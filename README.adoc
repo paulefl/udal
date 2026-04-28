@@ -54,7 +54,7 @@ udal/
 │   ├── python/            # Python SDK (asyncio)
 │   └── typescript/        # TypeScript / Node.js SDK
 ├── docs/
-│   ├── spec/SRS.adoc      # Software Requirements Specification
+│   ├── req42/req42.adoc   # Requirements (req42): Business Goals, Functional, Quality, Constraints, Interfaces
 │   └── arc42/ADRs/        # Architecture Decision Records
 ├── deployments/
 │   ├── docker/            # Docker Compose

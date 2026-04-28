@@ -22,7 +22,7 @@ Core capabilities:
 * *Streaming Telemetry* — clients subscribe to real-time property updates
 * *Multi-Transport* — MQTT (3.1.1 + 5), HTTP (poll + webhook), CAN (SocketCAN) supported simultaneously
 
-See link:../req42/req42.adoc[req42 Requirements Document] and link:../spec/SRS.adoc[SRS] for the full requirement set.
+See link:../req42/req42.adoc[req42 Requirements Document] for the full requirement set.
 
 === 1.2 Quality Goals
 
