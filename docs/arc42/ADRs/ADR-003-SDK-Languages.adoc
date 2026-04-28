@@ -1,0 +1,68 @@
+= ADR-003: SDK Language Selection
+:date: 2026-04-28
+:status: Accepted
+
+== Context
+
+UDAL needs client SDKs for both device-side (firmware, edge agents) and application-side (backend services, dashboards, data science) use cases.
+
+== Decision
+
+Four official SDKs for v1:
+
+* **Go** — gateway-side device agent and application consumption; gRPC primary
+* **Rust** — embedded device SDK (`no_std` optional); MQTT transport, zero allocation path
+* **Python** — prototyping, data science, scripting; REST + asyncio
+* **TypeScript** — web frontends and Node.js backend services; REST + WebSocket
+
+== Rationale
+
+[cols="2,1,1,1,1,1"]
+|===
+| Criterion | Go | Rust | Python | TypeScript | Weight
+
+| Embedded / bare-metal target
+| 0
+| +1
+| -1
+| -1
+| 3
+
+| Memory safety without GC
+| -1
+| +1
+| 0
+| 0
+| 2
+
+| Data science / ML ecosystem
+| -1
+| -1
+| +1
+| 0
+| 2
+
+| Web / dashboard integration
+| 0
+| -1
+| 0
+| +1
+| 2
+
+| Fastest iteration for gateway logic
+| +1
+| 0
+| 0
+| 0
+| 3
+|===
+
+C was considered for the embedded SDK but rejected in favour of Rust: memory safety guarantees reduce firmware bug surface without significant runtime overhead.
+
+== Consequences
+
+* Four separate SDK directories, each with own CI job, versioning, and package registry target
+* Go SDK shares proto-generated code with gateway (same module path)
+* Rust SDK targets `no_std` compatibility — no heap allocator required for MQTT-only path
+* Python SDK published to PyPI; TypeScript SDK to npm
+* Community SDKs (Java, C#, C) accepted as external contributions, not maintained in-tree

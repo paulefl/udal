@@ -1,0 +1,61 @@
+= ADR-004: Authentication and Authorisation Strategy
+:date: 2026-04-28
+:status: Accepted
+
+== Context
+
+UDAL must support two very different client types: embedded devices (constrained, long-lived connections) and application services (short-lived API calls). A single auth mechanism does not serve both well.
+
+== Decision
+
+**Three authentication mechanisms**, all supported simultaneously:
+
+1. **API-Key** (`X-API-Key` header) — for application services; simple, stateless
+2. **mTLS** (client certificate) — for devices; zero-roundtrip auth, certificate = identity
+3. **OAuth2 Device Flow** (JWT Bearer) — for interactive clients and service accounts; standards-compliant
+
+**Authorisation: RBAC + per-device ACL**
+
+* Roles: `admin`, `operator`, `reader`, `device`
+* Per-device ACL entries override role defaults (allow/deny specific operations)
+* ABAC: post-v1
+
+== Rationale
+
+[cols="3,1,1,1"]
+|===
+| Criterion | API-Key | mTLS | OAuth2 | Weight
+
+| Embedded device suitability (no TLS handshake overhead)
+| 0
+| +1
+| -1
+| 3
+
+| Stateless (no token refresh)
+| +1
+| +1
+| -1
+| 2
+
+| Standards compliance / enterprise integration
+| -1
+| 0
+| +1
+| 2
+
+| Revocation granularity
+| 0
+| +1
+| +1
+| 2
+|===
+
+All three are accepted because the use case space spans constrained devices to enterprise integrations.
+
+== Consequences
+
+* Auth middleware must handle all three in a single gRPC interceptor chain
+* mTLS requires TLS termination at the gateway (not at a load balancer) to access the client certificate
+* Token validation for OAuth2 requires a JWKS endpoint configuration (provider-agnostic)
+* API-Key rotation: keys stored hashed (bcrypt) in device registry; rotation via admin API

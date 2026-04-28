@@ -1,0 +1,373 @@
+{
+  "$schema": "./schema/udal.schema.json",
+
+  // ─── Specification ────────────────────────────────────────────────────────
+  "specification": {
+    "elements": {
+      "actor": {
+        "notation": "Actor",
+        "description": "A person or external system that interacts with UDAL"
+      },
+      "system": {
+        "notation": "Software System",
+        "description": "A top-level software system",
+        "container": true
+      },
+      "external_system": {
+        "notation": "External System",
+        "description": "A third-party system outside UDAL control"
+      },
+      "service": {
+        "notation": "Service",
+        "description": "A deployable runtime service",
+        "container": true
+      },
+      "component": {
+        "notation": "Component",
+        "description": "A logical module within a service",
+        "container": true
+      },
+      "library": {
+        "notation": "Library",
+        "description": "A client SDK or reusable library"
+      },
+      "datastore": {
+        "notation": "Data Store",
+        "description": "A persistent storage component"
+      },
+      "protocol": {
+        "notation": "Protocol Bus",
+        "description": "A transport protocol channel (MQTT broker, CAN bus, …)"
+      }
+    },
+    "relationships": {
+      "uses": {
+        "notation": "uses"
+      },
+      "calls": {
+        "notation": "calls (gRPC/REST)"
+      },
+      "publishes": {
+        "notation": "publishes",
+        "dashed": true
+      },
+      "subscribes": {
+        "notation": "subscribes",
+        "dashed": true
+      },
+      "reads": {
+        "notation": "reads"
+      },
+      "writes": {
+        "notation": "writes"
+      },
+      "implements": {
+        "notation": "implements"
+      }
+    }
+  },
+
+  // ─── Model ────────────────────────────────────────────────────────────────
+  "model": {
+
+    // External actors
+    "client_app": {
+      "kind": "actor",
+      "title": "Client Application",
+      "description": "Any application consuming UDAL API (backend service, dashboard, automation)"
+    },
+    "iot_device": {
+      "kind": "actor",
+      "title": "IoT Device",
+      "description": "A physical device connecting to UDAL via SDK or direct protocol"
+    },
+    "operator": {
+      "kind": "actor",
+      "title": "Operator",
+      "description": "DevOps / platform engineer managing the UDAL deployment"
+    },
+
+    // External systems
+    "mqtt_broker": {
+      "kind": "external_system",
+      "title": "MQTT Broker",
+      "description": "Eclipse Mosquitto or compatible broker (MQTT 3.1.1 / 5)",
+      "technology": "Mosquitto / EMQX"
+    },
+    "can_bus": {
+      "kind": "external_system",
+      "title": "CAN Bus",
+      "description": "Physical or virtual CAN bus (SocketCAN: can0, vcan0)",
+      "technology": "SocketCAN (Linux)"
+    },
+
+    // ── UDAL Gateway ──────────────────────────────────────────────────────
+    "gateway": {
+      "kind": "system",
+      "title": "UDAL Gateway",
+      "description": "Central runtime: API, routing, auth, device registry, adapter orchestration",
+      "tags": ["core"],
+      "children": {
+
+        "api": {
+          "kind": "service",
+          "title": "API Layer",
+          "description": "Exposes gRPC and REST endpoints for device interaction",
+          "technology": "Go, grpc-gateway",
+          "children": {
+            "grpc": {
+              "kind": "component",
+              "title": "gRPC Service",
+              "description": "Primary API: GetDevice, ListDevices, GetProperty, SetProperty, SendCommand, Subscribe",
+              "technology": "Go, protobuf"
+            },
+            "rest": {
+              "kind": "component",
+              "title": "REST Gateway",
+              "description": "HTTP/JSON translation layer over gRPC via grpc-gateway, exposes OpenAPI spec",
+              "technology": "Go, grpc-gateway"
+            }
+          }
+        },
+
+        "auth": {
+          "kind": "service",
+          "title": "Auth Middleware",
+          "description": "Authentication (API-Key, mTLS, OAuth2 Device Flow) and authorisation (RBAC + ACL)",
+          "technology": "Go",
+          "children": {
+            "authn": {
+              "kind": "component",
+              "title": "Authentication",
+              "description": "Validates API-Key, mTLS client certificate, or OAuth2 JWT"
+            },
+            "authz": {
+              "kind": "component",
+              "title": "Authorisation",
+              "description": "RBAC role check + per-device ACL evaluation"
+            }
+          }
+        },
+
+        "router": {
+          "kind": "service",
+          "title": "Message Router",
+          "description": "Routes API calls to the correct adapter; fans out device events to subscribers",
+          "technology": "Go"
+        },
+
+        "adapters": {
+          "kind": "service",
+          "title": "Adapter Layer",
+          "description": "Pluggable transport adapters — each implements the Transport interface",
+          "technology": "Go",
+          "children": {
+            "mqtt_adapter": {
+              "kind": "component",
+              "title": "MQTT Adapter",
+              "description": "Reads/writes device properties and commands via MQTT topics",
+              "technology": "Go, paho-mqtt"
+            },
+            "http_adapter": {
+              "kind": "component",
+              "title": "HTTP Adapter",
+              "description": "Poll-based property reads and webhook receiver for push events",
+              "technology": "Go, net/http"
+            },
+            "can_adapter": {
+              "kind": "component",
+              "title": "CAN Adapter",
+              "description": "Decodes/encodes CAN frames via SocketCAN using DBC or YAML signal maps",
+              "technology": "Go, go-socketcan"
+            }
+          }
+        },
+
+        "registry": {
+          "kind": "datastore",
+          "title": "Device Registry",
+          "description": "Persists registered devices: ID, schema, transport config, last-seen, online status",
+          "technology": "Go, bbolt (embedded)"
+        },
+
+        "capability_registry": {
+          "kind": "datastore",
+          "title": "Capability Registry",
+          "description": "Stores and versions device capability schemas (YAML/JSON)",
+          "technology": "Go, bbolt (embedded)"
+        },
+
+        "health": {
+          "kind": "component",
+          "title": "Health Monitor",
+          "description": "Heartbeat tracking, online/offline detection, Prometheus /metrics endpoint",
+          "technology": "Go, prometheus/client_golang"
+        }
+      }
+    },
+
+    // ── SDKs ──────────────────────────────────────────────────────────────
+    "sdks": {
+      "kind": "system",
+      "title": "UDAL SDKs",
+      "description": "Client libraries for devices and applications to interact with UDAL",
+      "children": {
+        "sdk_go": {
+          "kind": "library",
+          "title": "Go SDK",
+          "description": "Device SDK for Go-based devices and edge agents; also used for app-side consumption",
+          "technology": "Go"
+        },
+        "sdk_rust": {
+          "kind": "library",
+          "title": "Rust SDK",
+          "description": "Embedded device SDK for resource-constrained targets (RTOS, bare-metal)",
+          "technology": "Rust, no_std optional"
+        },
+        "sdk_python": {
+          "kind": "library",
+          "title": "Python SDK",
+          "description": "SDK for prototyping, data science, and scripting use cases",
+          "technology": "Python 3, asyncio"
+        },
+        "sdk_typescript": {
+          "kind": "library",
+          "title": "TypeScript SDK",
+          "description": "SDK for web frontends and Node.js backend services consuming UDAL",
+          "technology": "TypeScript, Node.js"
+        }
+      }
+    }
+  },
+
+  // ─── Relationships ────────────────────────────────────────────────────────
+  "relationships": [
+    // Client → Gateway
+    { "from": "client_app",          "to": "gateway.api.grpc",       "label": "gRPC calls",        "kind": "calls" },
+    { "from": "client_app",          "to": "gateway.api.rest",       "label": "REST/HTTP calls",   "kind": "calls" },
+
+    // API → Auth → Router
+    { "from": "gateway.api.grpc",    "to": "gateway.auth",           "label": "authenticate",      "kind": "uses" },
+    { "from": "gateway.api.rest",    "to": "gateway.auth",           "label": "authenticate",      "kind": "uses" },
+    { "from": "gateway.auth",        "to": "gateway.router",         "label": "forward authorised","kind": "uses" },
+
+    // Router → Adapters
+    { "from": "gateway.router",      "to": "gateway.adapters.mqtt_adapter", "label": "route",      "kind": "uses" },
+    { "from": "gateway.router",      "to": "gateway.adapters.http_adapter", "label": "route",      "kind": "uses" },
+    { "from": "gateway.router",      "to": "gateway.adapters.can_adapter",  "label": "route",      "kind": "uses" },
+
+    // Router → Registry
+    { "from": "gateway.router",      "to": "gateway.registry",       "label": "resolve device",    "kind": "reads" },
+
+    // Adapters → external protocols
+    { "from": "gateway.adapters.mqtt_adapter", "to": "mqtt_broker",  "label": "MQTT pub/sub",      "kind": "uses" },
+    { "from": "gateway.adapters.can_adapter",  "to": "can_bus",      "label": "SocketCAN read/write","kind": "uses" },
+
+    // Adapter → Capability Registry (schema validation)
+    { "from": "gateway.adapters.mqtt_adapter", "to": "gateway.capability_registry", "label": "validate schema", "kind": "reads" },
+
+    // Health Monitor → Registry
+    { "from": "gateway.health",      "to": "gateway.registry",       "label": "update last-seen",  "kind": "writes" },
+
+    // Devices → protocols
+    { "from": "iot_device",          "to": "mqtt_broker",            "label": "MQTT connect",      "kind": "uses" },
+    { "from": "iot_device",          "to": "can_bus",                "label": "CAN frames",        "kind": "uses" },
+
+    // SDKs → Gateway API
+    { "from": "sdks.sdk_go",         "to": "gateway.api.grpc",       "label": "gRPC",              "kind": "calls" },
+    { "from": "sdks.sdk_rust",       "to": "mqtt_broker",            "label": "MQTT (embedded)",   "kind": "uses" },
+    { "from": "sdks.sdk_python",     "to": "gateway.api.rest",       "label": "REST",              "kind": "calls" },
+    { "from": "sdks.sdk_typescript", "to": "gateway.api.rest",       "label": "REST / WebSocket",  "kind": "calls" },
+
+    // Operator
+    { "from": "operator",            "to": "gateway.health",         "label": "monitor metrics",   "kind": "uses" }
+  ],
+
+  // ─── Static Views ─────────────────────────────────────────────────────────
+  "views": {
+    "context": {
+      "title": "System Context",
+      "include": ["client_app", "iot_device", "operator", "gateway", "mqtt_broker", "can_bus"],
+      "description": "UDAL in its environment: clients, devices, external protocols",
+      "layout": "layered"
+    },
+    "gateway_internal": {
+      "title": "Gateway — Internal Structure",
+      "scope": "gateway",
+      "include": [
+        "gateway.api", "gateway.auth", "gateway.router",
+        "gateway.adapters", "gateway.registry",
+        "gateway.capability_registry", "gateway.health",
+        "mqtt_broker", "can_bus"
+      ],
+      "description": "Internal components of the UDAL Gateway and their connections",
+      "layout": "layered"
+    },
+    "sdks": {
+      "title": "SDK Overview",
+      "include": ["client_app", "iot_device", "sdks.*", "gateway.api.grpc", "gateway.api.rest", "mqtt_broker"],
+      "description": "Which SDK connects to which interface",
+      "layout": "layered"
+    },
+    "adapters": {
+      "title": "Adapter Layer",
+      "include": [
+        "gateway.router",
+        "gateway.adapters.mqtt_adapter",
+        "gateway.adapters.http_adapter",
+        "gateway.adapters.can_adapter",
+        "mqtt_broker", "can_bus"
+      ],
+      "description": "Transport adapter detail view",
+      "layout": "layered"
+    }
+  },
+
+  // ─── Dynamic Views (Sequence Diagrams) ────────────────────────────────────
+  "dynamicViews": [
+    {
+      "key": "property-read",
+      "title": "Property Read Flow",
+      "description": "Client reads a device property end-to-end via gRPC",
+      "steps": [
+        { "index": 1, "from": "client_app",                        "to": "gateway.api.grpc",              "label": "GetProperty(deviceId, path)", "type": "sync" },
+        { "index": 2, "from": "gateway.api.grpc",                  "to": "gateway.auth",                  "label": "authenticate + authorise",    "type": "sync" },
+        { "index": 3, "from": "gateway.auth",                      "to": "gateway.router",                "label": "forward",                     "type": "sync" },
+        { "index": 4, "from": "gateway.router",                    "to": "gateway.registry",              "label": "resolve transport config",    "type": "sync" },
+        { "index": 5, "from": "gateway.router",                    "to": "gateway.adapters.mqtt_adapter", "label": "ReadProperty()",              "type": "sync" },
+        { "index": 6, "from": "gateway.adapters.mqtt_adapter",     "to": "mqtt_broker",                   "label": "MQTT request/response",       "type": "sync" },
+        { "index": 7, "from": "gateway.adapters.mqtt_adapter",     "to": "gateway.router",                "label": "property value",              "type": "return" },
+        { "index": 8, "from": "gateway.router",                    "to": "gateway.api.grpc",              "label": "value",                       "type": "return" },
+        { "index": 9, "from": "gateway.api.grpc",                  "to": "client_app",                    "label": "PropertyResponse",            "type": "return" }
+      ]
+    },
+    {
+      "key": "device-registration",
+      "title": "Device Registration Flow",
+      "description": "IoT device registers itself via Go SDK on startup",
+      "steps": [
+        { "index": 1, "from": "iot_device",                        "to": "sdks.sdk_go",                   "label": "device.Run(ctx)",             "type": "sync" },
+        { "index": 2, "from": "sdks.sdk_go",                       "to": "gateway.api.grpc",              "label": "RegisterDevice(id, schema)",  "type": "sync" },
+        { "index": 3, "from": "gateway.api.grpc",                  "to": "gateway.auth",                  "label": "validate mTLS cert",          "type": "sync" },
+        { "index": 4, "from": "gateway.auth",                      "to": "gateway.router",                "label": "forward",                     "type": "sync" },
+        { "index": 5, "from": "gateway.router",                    "to": "gateway.capability_registry",   "label": "resolve schema",              "type": "sync" },
+        { "index": 6, "from": "gateway.router",                    "to": "gateway.registry",              "label": "persist device entry",        "type": "sync" },
+        { "index": 7, "from": "gateway.api.grpc",                  "to": "sdks.sdk_go",                   "label": "RegisterResponse (ok)",       "type": "return" },
+        { "index": 8, "from": "sdks.sdk_go",                       "to": "mqtt_broker",                   "label": "MQTT connect + subscribe",    "type": "async" }
+      ]
+    },
+    {
+      "key": "telemetry-publish",
+      "title": "Telemetry Publish Flow",
+      "description": "Device publishes a property update; client receives it via streaming subscription",
+      "steps": [
+        { "index": 1, "from": "iot_device",                        "to": "mqtt_broker",                   "label": "PUBLISH udal/{id}/props/temp", "type": "async" },
+        { "index": 2, "from": "gateway.adapters.mqtt_adapter",     "to": "mqtt_broker",                   "label": "SUBSCRIBE (receive)",         "type": "subscribes" },
+        { "index": 3, "from": "gateway.adapters.mqtt_adapter",     "to": "gateway.router",                "label": "PropertyEvent",               "type": "async" },
+        { "index": 4, "from": "gateway.health",                    "to": "gateway.registry",              "label": "update last-seen",            "type": "async" },
+        { "index": 5, "from": "gateway.router",                    "to": "gateway.api.grpc",              "label": "fan-out to subscribers",      "type": "async" },
+        { "index": 6, "from": "gateway.api.grpc",                  "to": "client_app",                    "label": "PropertyEvent (stream)",      "type": "return" }
+      ]
+    }
+  ]
+}

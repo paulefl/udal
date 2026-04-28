@@ -1,0 +1,52 @@
+= ADR-001: Monorepo Structure
+:date: 2026-04-28
+:status: Accepted
+
+== Context
+
+UDAL consists of multiple components: gateway, transport adapters, four language SDKs, API contracts, and documentation.
+We need to decide whether to maintain these as a single repository (monorepo) or as separate repositories per component.
+
+== Decision
+
+We use a **monorepo** (Option A) with clearly separated top-level directories per component.
+
+== Rationale
+
+[cols="3,1,1,1"]
+|===
+| Criterion | Monorepo | Multi-Repo | Weight
+
+| API contract changes propagate atomically
+| +1
+| -1
+| 3
+
+| Cross-component integration testing in CI
+| +1
+| 0
+| 3
+
+| SDK release coordination
+| +1
+| -1
+| 2
+
+| Independent versioning per component
+| -1
+| +1
+| 1
+
+| Contributor onboarding (one clone)
+| +1
+| -1
+| 2
+|===
+
+Weighted score: Monorepo **+9**, Multi-Repo **-5**.
+
+== Consequences
+
+* All components versioned together — breaking changes visible in one PR
+* CI must be scoped (only build/test affected components on each push)
+* Component-level versioning done via git tags (`sdk/go/v1.2.3`)

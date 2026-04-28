@@ -1,0 +1,121 @@
+= UDAL — Universal Device Abstraction Layer
+:toc:
+:toc-placement: left
+
+image:https://img.shields.io/badge/status-pre--alpha-red[]
+image:https://img.shields.io/badge/license-Apache%202.0-blue[]
+
+UDAL provides a unified API surface for interacting with heterogeneous IoT devices regardless of their underlying transport protocol.
+Applications talk to one consistent gRPC/REST interface; UDAL routes requests to the correct transport adapter.
+
+== Architecture
+
+The system is documented as code using link:https://github.com/docToolchain/Bausteinsicht[Bausteinsicht].
+See link:architecture.jsonc[architecture.jsonc] for the full model with system context, gateway internals, SDK overview, and sequence diagrams.
+
+----
+┌─────────────────────────────────────────────────────┐
+│                   UDAL Gateway                      │
+│  ┌──────────┐  ┌──────────┐  ┌──────────────────┐  │
+│  │ gRPC API │  │ REST API │  │  Auth Middleware  │  │
+│  └────┬─────┘  └────┬─────┘  └────────┬─────────┘  │
+│                  Message Router                      │
+│  ┌──────────┐  ┌──────────┐  ┌──────────────────┐  │
+│  │  MQTT    │  │  HTTP    │  │  CAN (SocketCAN)  │  │
+│  │ Adapter  │  │ Adapter  │  │  Adapter          │  │
+│  └──────────┘  └──────────┘  └──────────────────┘  │
+│  ┌────────────────┐  ┌──────────────────────────┐   │
+│  │ Device Registry│  │  Capability Registry     │   │
+│  │    (bbolt)     │  │        (bbolt)            │   │
+│  └────────────────┘  └──────────────────────────┘   │
+└─────────────────────────────────────────────────────┘
+         ↕ gRPC/TLS          ↕ gRPC/TLS
+   Client Applications    IoT Devices (SDK)
+----
+
+== Repository Structure
+
+----
+udal/
+├── architecture.jsonc     # Bausteinsicht architecture model
+├── gateway/               # Go — central gateway service
+│   ├── cmd/gateway/       # main entrypoint
+│   └── internal/          # api, auth, router, registry, capability, health
+├── adapters/              # Go — transport adapters
+│   ├── mqtt/              # MQTT v3.1.1 + v5
+│   ├── http/              # HTTP poll + webhook
+│   └── can/               # SocketCAN
+├── api/
+│   ├── proto/             # Protobuf definitions + generated code
+│   └── openapi/           # Generated OpenAPI v3 spec
+├── sdk/
+│   ├── go/                # Go SDK (device + application)
+│   ├── rust/              # Rust SDK (embedded, no_std optional)
+│   ├── python/            # Python SDK (asyncio)
+│   └── typescript/        # TypeScript / Node.js SDK
+├── docs/
+│   ├── spec/SRS.adoc      # Software Requirements Specification
+│   └── arc42/ADRs/        # Architecture Decision Records
+├── deployments/
+│   ├── docker/            # Docker Compose
+│   ├── kubernetes/        # Helm chart
+│   └── binary/            # GoReleaser config
+└── examples/              # Runnable demos
+----
+
+== Non-Functional Requirements (v1)
+
+|===
+| Requirement | Target
+
+| End-to-end latency (p99)
+| < 50 ms
+
+| Concurrent devices (single instance)
+| 1,000
+
+| Deployment targets
+| Single binary, Docker, Kubernetes
+
+| Transport protocols
+| MQTT (3.1.1 + 5), HTTP, CAN (SocketCAN)
+
+| Authentication
+| API-Key, mTLS, OAuth2 Device Flow
+
+| Authorisation
+| RBAC + per-device ACL
+
+| Persistence
+| Device Registry (embedded bbolt)
+|===
+
+== SDKs
+
+|===
+| SDK | Language | Primary Use
+
+| link:sdk/go/[Go SDK]
+| Go
+| Device agents, backend services
+
+| link:sdk/rust/[Rust SDK]
+| Rust
+| Embedded devices, bare-metal, RTOS
+
+| link:sdk/python/[Python SDK]
+| Python
+| Prototyping, data science
+
+| link:sdk/typescript/[TypeScript SDK]
+| TypeScript / Node.js
+| Web frontends, Node.js services
+|===
+
+== Status
+
+Pre-alpha. See link:https://github.com/paulefl/udal/milestones[Milestones] for roadmap.
+
+== License
+
+Apache 2.0 — see link:LICENSE[LICENSE].

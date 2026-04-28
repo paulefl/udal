@@ -1,0 +1,35 @@
+# Go
+bin/
+dist/
+*.exe
+*.test
+*.out
+vendor/
+
+# Rust
+target/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+# Node.js
+node_modules/
+*.js.map
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# UDAL runtime
+udal-registry.db
+udal-capability.db
+*.pem
+*.key
+*.crt
+
+# Build
+api/proto/gen/
