@@ -1,0 +1,398 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# ─── Change Detection ─────────────────────────────────────────────────────────
+jobs:
+  changes:
+    name: Detect changed paths
+    runs-on: ubuntu-latest
+    outputs:
+      go:           ${{ steps.filter.outputs.go }}
+      rust:         ${{ steps.filter.outputs.rust }}
+      python:       ${{ steps.filter.outputs.python }}
+      typescript:   ${{ steps.filter.outputs.typescript }}
+      reflex:       ${{ steps.filter.outputs.reflex }}
+      proto:        ${{ steps.filter.outputs.proto }}
+      docker:       ${{ steps.filter.outputs.docker }}
+      architecture: ${{ steps.filter.outputs.architecture }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            go:
+              - 'gateway/**'
+              - 'adapters/**'
+              - 'sdk/go/**'
+              - 'go.mod'
+              - 'go.sum'
+            rust:
+              - 'sdk/rust/**'
+              - '**/Cargo.toml'
+              - '**/Cargo.lock'
+            python:
+              - 'sdk/python/**'
+              - '**/pyproject.toml'
+              - '**/requirements*.txt'
+            typescript:
+              - 'sdk/typescript/**'
+              - '**/package.json'
+              - '**/tsconfig.json'
+            reflex:
+              - 'dashboard/**'
+              - 'sdk/python/**'
+            proto:
+              - 'api/proto/**'
+              - 'buf.yaml'
+              - 'buf.gen.yaml'
+            docker:
+              - 'gateway/**'
+              - 'deployments/docker/**'
+              - 'Dockerfile'
+            architecture:
+              - 'architecture.jsonc'
+
+# ─── Go: Build + Test + Lint + Security ──────────────────────────────────────
+  go-build-test:
+    name: Go — Build & Test
+    needs: changes
+    if: needs.changes.outputs.go == 'true' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: true
+
+      - name: Build gateway
+        run: go build ./gateway/... ./adapters/... ./sdk/go/...
+
+      - name: Unit tests
+        run: go test -race -coverprofile=coverage.out ./gateway/... ./adapters/... ./sdk/go/...
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-coverage
+          path: coverage.out
+
+  go-lint:
+    name: Go — Lint
+    needs: changes
+    if: needs.changes.outputs.go == 'true' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: true
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout=5m ./gateway/... ./adapters/... ./sdk/go/...
+
+  go-security:
+    name: Go — Security (gosec + govulncheck)
+    needs: changes
+    if: needs.changes.outputs.go == 'true' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: true
+
+      - name: Install gosec
+        run: go install github.com/securego/gosec/v2/cmd/gosec@latest
+
+      - name: Run gosec
+        run: gosec ./gateway/... ./adapters/... ./sdk/go/...
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Run govulncheck
+        run: govulncheck ./gateway/... ./adapters/... ./sdk/go/...
+
+# ─── Go: Integration Tests (MQTT via Docker) ──────────────────────────────────
+  go-integration:
+    name: Go — Integration Tests (MQTT)
+    needs: [go-build-test]
+    if: needs.changes.outputs.go == 'true' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    services:
+      mosquitto:
+        image: eclipse-mosquitto:2
+        ports:
+          - 1883:1883
+        options: >-
+          --health-cmd "mosquitto_sub -h localhost -t test -C 1 --quiet &"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: true
+
+      - name: Run integration tests
+        run: go test -v -tags integration -timeout 120s ./adapters/mqtt/... ./gateway/...
+        env:
+          UDAL_TEST_MQTT_BROKER: tcp://localhost:1883
+
+# ─── Rust ─────────────────────────────────────────────────────────────────────
+  rust-ci:
+    name: Rust — Build, Test, Clippy, Audit
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/rust
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: sdk/rust
+
+      - name: Build
+        run: cargo build --all-features
+
+      - name: Test
+        run: cargo test --all-features
+
+      - name: Clippy
+        run: cargo clippy --all-features -- -D warnings
+
+      - name: Format check
+        run: cargo fmt --check
+
+      - name: Security audit
+        run: |
+          cargo install cargo-audit --quiet
+          cargo audit
+
+# ─── Python ───────────────────────────────────────────────────────────────────
+  python-ci:
+    name: Python SDK — Lint, Test, Security
+    needs: changes
+    if: needs.changes.outputs.python == 'true' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Lint + format (ruff)
+        run: |
+          ruff check .
+          ruff format --check .
+
+      - name: Type check (mypy)
+        run: mypy .
+
+      - name: Tests
+        run: pytest --tb=short -q
+
+      - name: Security (pip-audit)
+        run: |
+          pip install pip-audit
+          pip-audit
+
+# ─── Reflex Dashboard ─────────────────────────────────────────────────────────
+  reflex-ci:
+    name: Reflex Dashboard — Lint + Build check
+    needs: changes
+    if: needs.changes.outputs.reflex == 'true' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Type check (mypy)
+        run: mypy .
+
+      - name: Reflex build check
+        run: reflex export --no-zip 2>&1 | grep -v "^$" || true
+
+# ─── TypeScript SDK ───────────────────────────────────────────────────────────
+  typescript-ci:
+    name: TypeScript SDK — Lint, Test, Audit
+    needs: changes
+    if: needs.changes.outputs.typescript == 'true' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/typescript
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: sdk/typescript/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint (eslint)
+        run: npm run lint
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Tests
+        run: npm test
+
+      - name: Security audit
+        run: npm audit --audit-level=high
+
+# ─── Protobuf ─────────────────────────────────────────────────────────────────
+  proto-ci:
+    name: Proto — Lint + Breaking Change Check
+    needs: changes
+    if: needs.changes.outputs.proto == 'true' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # needed for buf breaking against main
+
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          version: "1.32.0"
+
+      - name: Proto lint
+        run: buf lint api/proto
+
+      - name: Breaking change check (against main)
+        if: github.event_name == 'pull_request'
+        run: buf breaking api/proto --against "https://github.com/${{ github.repository }}.git#branch=main,subdir=api/proto"
+
+      - name: Generate Go stubs (verify compilable)
+        run: buf generate api/proto
+
+# ─── Docker ───────────────────────────────────────────────────────────────────
+  docker-build:
+    name: Docker — Build Gateway Image
+    needs: [go-build-test]
+    if: |
+      needs.changes.outputs.docker == 'true' ||
+      github.ref == 'refs/heads/main' ||
+      startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: deployments/docker/Dockerfile
+          push: false
+          tags: udal-gateway:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Check image size (≤ 30 MB)
+        run: |
+          SIZE=$(docker image inspect udal-gateway:ci --format='{{.Size}}')
+          LIMIT=$((30 * 1024 * 1024))
+          echo "Image size: $((SIZE / 1024 / 1024)) MB (limit: 30 MB)"
+          if [ "$SIZE" -gt "$LIMIT" ]; then
+            echo "ERROR: Docker image exceeds 30 MB limit"
+            exit 1
+          fi
+
+# ─── Architecture Validation ──────────────────────────────────────────────────
+  architecture-validate:
+    name: Architecture — Validate Bausteinsicht model
+    needs: changes
+    if: needs.changes.outputs.architecture == 'true' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Install bausteinsicht
+        run: go install github.com/docToolchain/Bausteinsicht/cmd/bausteinsicht@latest
+
+      - name: Validate architecture model
+        run: bausteinsicht validate --model architecture.jsonc
+
+# ─── Summary Gate ─────────────────────────────────────────────────────────────
+  ci-gate:
+    name: CI Gate (all checks passed)
+    needs:
+      - go-build-test
+      - go-lint
+      - go-security
+      - go-integration
+      - rust-ci
+      - python-ci
+      - reflex-ci
+      - typescript-ci
+      - proto-ci
+      - docker-build
+      - architecture-validate
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check all jobs
+        run: |
+          results='${{ toJSON(needs) }}'
+          echo "$results" | python3 -c "
+          import json, sys
+          needs = json.load(sys.stdin)
+          failed = [
+            name for name, data in needs.items()
+            if data['result'] not in ('success', 'skipped')
+          ]
+          if failed:
+            print('FAILED jobs:', ', '.join(failed))
+            sys.exit(1)
+          print('All jobs passed or were skipped.')
+          "

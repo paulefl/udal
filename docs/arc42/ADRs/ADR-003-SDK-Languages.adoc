@@ -8,12 +8,13 @@ UDAL needs client SDKs for both device-side (firmware, edge agents) and applicat
 
 == Decision
 
-Four official SDKs for v1:
+Four official SDKs + one reference dashboard for v1:
 
 * **Go** — gateway-side device agent and application consumption; gRPC primary
 * **Rust** — embedded device SDK (`no_std` optional); MQTT transport, zero allocation path
 * **Python** — prototyping, data science, scripting; REST + asyncio
 * **TypeScript** — web frontends and Node.js backend services; REST + WebSocket
+* **Python Reflex** — reference dashboard app built on top of the Python SDK; full-stack web UI without writing TypeScript (compiles to React)
 
 == Rationale
 
@@ -59,9 +60,14 @@ Four official SDKs for v1:
 
 C was considered for the embedded SDK but rejected in favour of Rust: memory safety guarantees reduce firmware bug surface without significant runtime overhead.
 
+Reflex was added alongside TypeScript SDK because:
+- Python-heavy teams (data science, ML) can build dashboards without context-switching to TypeScript
+- Reflex compiles to React — full web capability without a separate language
+- TypeScript SDK remains for Node.js backends and teams already in the JS ecosystem
+
 == Consequences
 
-* Four separate SDK directories, each with own CI job, versioning, and package registry target
+* Five separate SDK/app directories, each with own CI job, versioning, and package registry target
 * Go SDK shares proto-generated code with gateway (same module path)
 * Rust SDK targets `no_std` compatibility — no heap allocator required for MQTT-only path
 * Python SDK published to PyPI; TypeScript SDK to npm

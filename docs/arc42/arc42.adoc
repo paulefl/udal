@@ -1,0 +1,590 @@
+= UDAL — Architecture Documentation (arc42)
+:doctype: article
+:toc:
+:toc-placement: left
+:sectnums:
+:version: 0.1.0-draft
+:date: 2026-04-28
+ifndef::imagesdir[:imagesdir: ../images]
+
+// ─────────────────────────────────────────────────────────────────────────────
+== 1. Introduction and Goals
+
+=== 1.1 Requirements Overview
+
+UDAL (Universal Device Abstraction Layer) provides a unified API surface for interacting with heterogeneous IoT devices regardless of their underlying transport protocol.
+
+Core capabilities:
+
+* *Device Registration* — devices declare their identity and capability schema on connect
+* *Property Read / Write* — clients read and write typed device properties via a single API
+* *Command Dispatch* — clients send named commands with typed parameters to devices
+* *Streaming Telemetry* — clients subscribe to real-time property updates
+* *Multi-Transport* — MQTT (3.1.1 + 5), HTTP (poll + webhook), CAN (SocketCAN) supported simultaneously
+
+See link:../req42/req42.adoc[req42 Requirements Document] and link:../spec/SRS.adoc[SRS] for the full requirement set.
+
+=== 1.2 Quality Goals
+
+[cols="1,2,3"]
+|===
+| Priority | Quality Goal | Scenario
+
+| 1
+| *Low Latency*
+| A client reads a device property. End-to-end p99 latency (API request → adapter → device → response) is < 50 ms under normal load (≤ 1,000 devices, ≤ 100 req/s).
+
+| 2
+| *Protocol Transparency*
+| A client application does not need to know or handle the device's underlying transport. The same API call works regardless of whether the device speaks MQTT, HTTP, or CAN.
+
+| 3
+| *Embedded Suitability*
+| A device SDK (Rust) must run on a bare-metal Cortex-M microcontroller with < 8 KB flash and < 2 KB RAM overhead for the MQTT-only path.
+
+| 4
+| *Operational Simplicity*
+| An operator deploys UDAL gateway as a single binary or Docker container with one config file. No external database required for v1.
+
+| 5
+| *Security by Default*
+| All connections use TLS. Authentication is required on every request. A misconfigured or missing credential returns an explicit error, never silent pass-through.
+|===
+
+=== 1.3 Stakeholders
+
+[cols="1,2,2"]
+|===
+| Stakeholder | Role | Key Concern
+
+| Application Developer
+| Builds services consuming device data
+| Stable, well-documented API; low latency; easy SDK integration
+
+| Device Developer
+| Builds firmware / edge agents
+| Lightweight SDK; minimal dependencies; clear capability schema format
+
+| Platform Operator
+| Deploys and monitors UDAL
+| Single binary; Prometheus metrics; simple config; Kubernetes-ready
+
+| Security Engineer
+| Reviews and audits
+| TLS everywhere; credential validation; audit log
+
+| Open Source Contributor
+| Extends adapters or SDKs
+| Clear CONTRIBUTING.md; pluggable Transport interface; good test coverage
+|===
+
+// ─────────────────────────────────────────────────────────────────────────────
+== 2. Architecture Constraints
+
+=== 2.1 Technical Constraints
+
+[cols="1,3"]
+|===
+| Constraint | Rationale
+
+| Linux ≥ 5.10 for CAN adapter
+| SocketCAN socket interface requires a modern kernel; Windows/macOS not supported for CAN in v1
+
+| No mandatory external database
+| v1 must run on edge hardware without a database server; bbolt embedded store used
+
+| TLS 1.2 minimum everywhere
+| Security requirement (NFR-004); plain-text mode only allowed in explicit `--dev` flag
+
+| Protobuf as API contract
+| Language-neutral; enforces schema; enables grpc-gateway for REST
+
+| Single binary deployment
+| Edge hardware (Raspberry Pi, industrial PC) may not have a container runtime
+|===
+
+=== 2.2 Organisational Constraints
+
+[cols="1,3"]
+|===
+| Constraint | Rationale
+
+| Apache 2.0 licence
+| Permissive licence allows commercial use by end users
+
+| Monorepo
+| All components version-locked together; see ADR-001
+
+| Conventional Commits
+| Enables automatic changelog generation for releases
+
+| No vendored dependencies
+| Go modules, Cargo, pip, npm manage dependencies; `go mod vendor` not used
+|===
+
+// ─────────────────────────────────────────────────────────────────────────────
+== 3. System Scope and Context
+
+=== 3.1 Business Context
+
+[source]
+----
+┌──────────────────┐        ┌───────────────────────────────────────────────┐
+│  Client Apps     │        │                  UDAL                         │
+│  (backend svcs,  │◄──────►│  Unified device API — protocol-transparent    │
+│   dashboards)    │        └───────────────────────────────────────────────┘
+└──────────────────┘             ▲              ▲              ▲
+                                 │              │              │
+                          MQTT Broker      HTTP Devices    CAN Bus
+                                 │              │              │
+                          ┌──────┴──────────────┴──────────────┴──────┐
+                          │              IoT Devices                   │
+                          └─────────────────────────────────────────────┘
+----
+
+UDAL hides the protocol heterogeneity from client applications. Clients see one unified API regardless of how devices are physically connected.
+
+=== 3.2 Technical Context
+
+[cols="2,1,3"]
+|===
+| Interface | Protocol | Description
+
+| Client → Gateway
+| gRPC / TLS
+| Primary API for application services and Go SDK
+
+| Client → Gateway
+| HTTPS + JSON
+| REST gateway via grpc-gateway; used by Python, TypeScript, and Reflex SDKs
+
+| Gateway → MQTT Broker
+| MQTT 3.1.1 / 5 / TLS
+| Adapter communicates with MQTT-based devices via broker
+
+| Gateway → HTTP Device
+| HTTPS
+| Adapter polls or receives webhooks from HTTP-based devices
+
+| Gateway → CAN Bus
+| SocketCAN
+| Adapter reads/writes raw CAN frames via Linux SocketCAN interface
+
+| Device → Gateway
+| gRPC / TLS (Go/Rust SDK)
+| Device registration and command response path
+
+| Device → MQTT Broker
+| MQTT / TLS
+| Telemetry publish path for MQTT devices
+|===
+
+// ─────────────────────────────────────────────────────────────────────────────
+== 4. Solution Strategy
+
+[cols="1,2,2"]
+|===
+| Goal | Decision | Rationale
+
+| Protocol transparency
+| Pluggable `Transport` interface + Message Router
+| Adapters are interchangeable; router resolves device → correct adapter at runtime
+
+| Low latency
+| In-process adapter calls (structured monolith)
+| No IPC overhead; sub-millisecond routing from router to adapter
+
+| Embedded suitability
+| Rust SDK, no_std optional, MQTT-only path
+| Rust zero-cost abstractions; MQTT needs no TLS handshake per property read
+
+| Operational simplicity
+| Single binary + bbolt embedded store
+| No external DB; one config file; works on edge hardware and in containers
+
+| Security by default
+| TLS mandatory; three auth methods in interceptor chain
+| Every deployment is secure out of the box; dev mode explicitly opt-in
+
+| Open extension
+| Transport interface as public API seam
+| Third-party adapters can be compiled in without forking the gateway
+|===
+
+// ─────────────────────────────────────────────────────────────────────────────
+== 5. Building Block View
+
+=== 5.1 Level 1 — System Overview
+
+The system consists of three top-level elements:
+
+* **UDAL Gateway** — central runtime (see §5.2)
+* **UDAL SDKs** — client and device libraries (Go, Rust, Python, TypeScript, Reflex)
+* **External Systems** — MQTT Broker, CAN Bus (operated outside UDAL)
+
+See `architecture.jsonc` view `context` for the diagram.
+
+=== 5.2 Level 2 — UDAL Gateway
+
+[cols="2,1,3"]
+|===
+| Component | Technology | Responsibility
+
+| API Layer (gRPC + REST)
+| Go, grpc-gateway
+| Exposes all operations as gRPC RPCs; translates HTTP/JSON via grpc-gateway
+
+| Auth Middleware
+| Go
+| gRPC interceptor: authenticate (API-Key, mTLS, OAuth2 JWT) + authorise (RBAC + ACL)
+
+| Message Router
+| Go
+| Resolves device → transport adapter; fans out events to subscribers
+
+| MQTT Adapter
+| Go, paho-mqtt
+| Transport implementation for MQTT 3.1.1 / 5
+
+| HTTP Adapter
+| Go, net/http
+| Transport implementation for HTTP poll + webhook
+
+| CAN Adapter
+| Go, go-socketcan
+| Transport implementation for SocketCAN; decodes CAN frames via signal map
+
+| Device Registry
+| Go, bbolt
+| Persists device entries; answers GetDevice / ListDevices queries
+
+| Capability Registry
+| Go, bbolt
+| Stores capability schema versions; validates device registration
+
+| Health Monitor
+| Go, prometheus/client_golang
+| Heartbeat tracking; online/offline events; /health + /metrics endpoints
+|===
+
+See `architecture.jsonc` view `gateway_internal` for the diagram.
+
+=== 5.3 Level 2 — SDK Overview
+
+[cols="2,1,3"]
+|===
+| SDK | Language | Primary Use
+
+| Go SDK
+| Go
+| Device agents and backend service consumption; gRPC primary
+
+| Rust SDK
+| Rust
+| Embedded firmware and RTOS edge agents; MQTT transport; no_std optional
+
+| Python SDK
+| Python 3
+| Prototyping, scripting, data science pipelines
+
+| TypeScript SDK
+| TypeScript / Node.js
+| Node.js backend services and browser frontends
+
+| Reflex Dashboard
+| Python Reflex
+| Reference web dashboard: device list, property browser, live telemetry
+|===
+
+// ─────────────────────────────────────────────────────────────────────────────
+== 6. Runtime View
+
+=== 6.1 Property Read
+
+See `architecture.jsonc` dynamic view `property-read` for the sequence diagram.
+
+. Client calls `GetProperty(deviceId, "temperature")` via gRPC
+. Auth middleware validates credential and RBAC role
+. Router resolves device transport config from Device Registry
+. Router calls `ReadProperty()` on the MQTT Adapter
+. MQTT Adapter publishes request topic; waits for device response (timeout: 5 s)
+. Value returned back through router → API → client
+. **Target:** p99 < 50 ms end-to-end
+
+=== 6.2 Device Registration
+
+See `architecture.jsonc` dynamic view `device-registration` for the sequence diagram.
+
+. Device calls `Run(ctx)` in the Go SDK
+. SDK calls `RegisterDevice(id, schema)` via gRPC with mTLS certificate
+. Auth middleware validates mTLS certificate
+. Router resolves schema in Capability Registry
+. Router persists device entry in Device Registry
+. SDK connects to MQTT broker and subscribes to command topics
+
+=== 6.3 Telemetry Publish (Async)
+
+See `architecture.jsonc` dynamic view `telemetry-publish` for the sequence diagram.
+
+. Device publishes to MQTT topic `udal/{id}/props/temperature`
+. MQTT Adapter receives event; forwards `PropertyEvent` to Router
+. Health Monitor updates `last-seen` timestamp in Device Registry
+. Router fans out event to all active `Subscribe` streams
+. Each subscribed client receives `PropertyEvent` over gRPC server-side stream
+
+// ─────────────────────────────────────────────────────────────────────────────
+== 7. Deployment View
+
+=== 7.1 Single Binary (Edge)
+
+[source]
+----
+┌───────────────────────────────────────┐
+│  Edge Host (Linux, amd64 / arm64)     │
+│  ┌───────────────┐  ┌───────────────┐ │
+│  │ udal-gateway  │  │  Mosquitto    │ │
+│  │  (binary)     │  │  (MQTT broker)│ │
+│  └───────────────┘  └───────────────┘ │
+│  Config: /etc/udal/gateway.yaml       │
+│  Registry: /var/udal/registry.db      │
+└───────────────────────────────────────┘
+----
+
+=== 7.2 Docker Compose (Development / Small Deployment)
+
+[source,yaml]
+----
+services:
+  gateway:
+    image: ghcr.io/paulefl/udal:latest
+    ports: ["50051:50051", "8080:8080", "9090:9090"]
+    volumes: ["./config:/etc/udal", "udal-data:/var/udal"]
+    environment:
+      UDAL_MQTT_BROKER: tcp://mosquitto:1883
+  mosquitto:
+    image: eclipse-mosquitto:2
+    ports: ["1883:1883"]
+volumes:
+  udal-data:
+----
+
+=== 7.3 Kubernetes (Production)
+
+* Helm chart in `deployments/kubernetes/`
+* Gateway: `Deployment` with 2–N replicas (stateless routing, registry via shared PVC)
+* Horizontal Pod Autoscaler on `udal_requests_total` metric
+* `ServiceMonitor` for Prometheus Operator
+* mTLS via cert-manager `Certificate` resources
+
+// ─────────────────────────────────────────────────────────────────────────────
+== 8. Cross-cutting Concepts
+
+=== 8.1 Error Handling
+
+* All errors returned as gRPC status codes with structured `google.rpc.Status` details
+* REST gateway translates gRPC status → HTTP status code automatically
+* Adapter errors use circuit breaker (5 consecutive failures → open 30 s)
+* Panics in adapter goroutines are recovered and logged; gateway continues
+
+=== 8.2 Logging
+
+* Structured JSON logs via `log/slog` (Go 1.21+)
+* Fields: `timestamp`, `level`, `component`, `trace_id`, `device_id`, `error`
+* Log level configurable at runtime via `UDAL_LOG_LEVEL` env var
+
+=== 8.3 Observability
+
+* **Metrics:** Prometheus at `/metrics` — `udal_devices_online`, `udal_requests_total{operation,status}`, `udal_adapter_errors_total{adapter}`, `udal_request_duration_seconds`
+* **Tracing:** OpenTelemetry (OTLP exporter); trace context propagated via gRPC metadata
+* **Health:** `GET /health` returns HTTP 200 when gateway is ready
+
+=== 8.4 Configuration
+
+Single YAML file with full env-var override (`UDAL_` prefix):
+
+[source,yaml]
+----
+gateway:
+  grpc_port: 50051
+  http_port: 8080
+  metrics_port: 9090
+  tls:
+    cert: /etc/udal/tls/server.crt
+    key:  /etc/udal/tls/server.key
+    ca:   /etc/udal/tls/ca.crt
+  auth:
+    api_key_header: X-API-Key
+    jwks_url: https://auth.example.com/.well-known/jwks.json
+  registry:
+    path: /var/udal/registry.db
+  adapters:
+    mqtt:
+      broker: tcp://mosquitto:1883
+      client_id: udal-gateway
+    http:
+      poll_interval: 5s
+    can:
+      interface: can0
+  heartbeat_interval: 30s
+  device_timeout: 90s
+----
+
+=== 8.5 Security
+
+* TLS mandatory on all listeners (opt-out via `--dev` flag only)
+* Auth interceptor runs before any handler; no handler is reachable unauthenticated
+* API keys stored as bcrypt hashes; never returned in API responses
+* mTLS: gateway validates client certificate chain against configured CA
+* Input validation on all gRPC message fields; invalid values → `INVALID_ARGUMENT`
+
+// ─────────────────────────────────────────────────────────────────────────────
+== 9. Architecture Decisions
+
+See link:ADRs/[Architecture Decision Records] for all decisions:
+
+[cols="1,3,1"]
+|===
+| ADR | Decision | Status
+
+| link:ADRs/ADR-001-Monorepo.adoc[ADR-001]
+| Monorepo structure
+| Accepted
+
+| link:ADRs/ADR-002-Gateway-Architecture.adoc[ADR-002]
+| Structured Monolith gateway (vs. plugin-monolith)
+| Accepted
+
+| link:ADRs/ADR-003-SDK-Languages.adoc[ADR-003]
+| SDK languages: Go, Rust, Python, TypeScript + Reflex dashboard
+| Accepted
+
+| link:ADRs/ADR-004-Auth-Strategy.adoc[ADR-004]
+| Auth: API-Key + mTLS + OAuth2; Authz: RBAC + ACL
+| Accepted
+|===
+
+// ─────────────────────────────────────────────────────────────────────────────
+== 10. Quality Requirements
+
+=== 10.1 Quality Scenarios
+
+[cols="1,2,3,2"]
+|===
+| ID | Stimulus | Response | Measure
+
+| QS-01
+| Client calls GetProperty under 100 req/s with 1,000 connected MQTT devices
+| Gateway routes request, adapter queries device, returns value
+| p99 latency < 50 ms
+
+| QS-02
+| MQTT broker becomes unreachable
+| MQTT adapter activates circuit breaker; CAN and HTTP adapters continue; MQTT devices return UNAVAILABLE
+| Other adapters respond normally within 1 s of broker failure
+
+| QS-03
+| Attacker sends request without any credential
+| Auth middleware rejects immediately with UNAUTHENTICATED; no device state touched
+| 100% of unauthenticated requests rejected; no information leak
+
+| QS-04
+| Operator deploys gateway binary on Raspberry Pi 4
+| Gateway starts, connects to Mosquitto, serves API
+| Start-up time < 3 s; RAM usage < 150 MB at idle
+
+| QS-05
+| Rust SDK embedded in bare-metal Cortex-M firmware
+| SDK compiles with no_std, registers device, publishes property
+| Flash overhead < 8 KB; RAM overhead < 2 KB; no heap allocator required
+
+| QS-06
+| New contributor adds a third-party CAN J1939 adapter
+| Contributor implements Transport interface, compiles it into the gateway
+| Zero changes to gateway core; CI passes; adapter discoverable via config
+|===
+
+// ─────────────────────────────────────────────────────────────────────────────
+== 11. Risks and Technical Debt
+
+[cols="2,1,2,2"]
+|===
+| Risk | Probability | Impact | Mitigation
+
+| CAN adapter panic brings down entire gateway (structured monolith)
+| Medium
+| High — all devices affected
+| recover() in adapter goroutine; circuit breaker; isolate CAN adapter in separate goroutine pool
+
+| bbolt registry performance degrades with > 10,000 devices
+| Low (v1 scope: 1,000)
+| Medium — higher latency on ListDevices
+| Add pagination to ListDevices; PostgreSQL backend planned for v2
+
+| MQTT broker as single point of failure for MQTT devices
+| Medium
+| High for MQTT-only deployments
+| Document broker HA setup (EMQX cluster); future: built-in MQTT broker option
+
+| Rust SDK no_std breakage on RTOS updates
+| Low
+| Medium — embedded targets affected
+| CI test on ARM cross-compilation target; maintain QEMU test for bare-metal path
+
+| Breaking proto API changes without clients noticing
+| Medium
+| High — all SDK consumers affected
+| buf breaking check in CI; semantic versioning; deprecation policy before removal
+|===
+
+// ─────────────────────────────────────────────────────────────────────────────
+== 12. Glossary
+
+[cols="1,3"]
+|===
+| Term | Definition
+
+| Adapter
+| A gateway-internal plugin implementing the `Transport` interface for one protocol
+
+| bbolt
+| Embedded key/value store for Go (formerly boltdb); used for Device and Capability registries
+
+| buf
+| Protobuf toolchain for linting, formatting, and breaking-change detection
+
+| Capability Schema
+| YAML/JSON document describing a device's properties, commands, and events
+
+| CAN
+| Controller Area Network — automotive/industrial fieldbus protocol
+
+| Circuit Breaker
+| Pattern: after N consecutive errors, stop calling a failing dependency for a cooldown period
+
+| gRPC
+| Google Remote Procedure Call — binary RPC over HTTP/2 using protobuf
+
+| grpc-gateway
+| Go library that generates REST/JSON proxy from gRPC service definitions
+
+| MQTT
+| Message Queuing Telemetry Transport — lightweight pub/sub protocol for IoT
+
+| no_std
+| Rust compilation mode that excludes the standard library; suitable for bare-metal targets
+
+| RBAC
+| Role-Based Access Control — permissions assigned to named roles
+
+| Reflex
+| Python full-stack web framework that compiles Python to React/Next.js
+
+| SocketCAN
+| Linux kernel subsystem providing a socket-based API for CAN bus access
+
+| Transport
+| Go interface (`ReadProperty`, `WriteProperty`, `SendCommand`, `Subscribe`) implemented by each adapter
+
+| UDS
+| Unified Diagnostic Services (ISO 14229) — automotive ECU diagnostic protocol
+|===

@@ -1,0 +1,416 @@
+= UDAL — Requirements Documentation (req42)
+:doctype: article
+:toc:
+:toc-placement: left
+:sectnums:
+:version: 0.1.0-draft
+:date: 2026-04-28
+
+// req42 is a lightweight requirements framework by Peter Hruschka & Gernot Starke.
+// Structure: Business Goals → Stakeholders → Scope → Functional → Quality → Constraints
+
+// ─────────────────────────────────────────────────────────────────────────────
+== 1. Business Goals
+
+[cols="1,3,2"]
+|===
+| ID | Goal | Success Criterion
+
+| BG-01
+| *Reduce IoT integration effort* — application developers should integrate a new device type in < 1 day without writing protocol-specific code
+| Developer survey: > 80% achieve first device integration in < 1 working day
+
+| BG-02
+| *Enable embedded deployment* — UDAL must run at the edge without a cloud dependency or an external database
+| Gateway runs on Raspberry Pi 4 with ≤ 150 MB RAM at idle, zero external services
+
+| BG-03
+| *Protocol independence* — application code must not change when a device's transport is replaced
+| Replacing an MQTT device with an HTTP device requires zero changes to client application code
+
+| BG-04
+| *Open ecosystem* — third-party contributors can add transport adapters without forking
+| External adapter compiles into gateway by implementing Transport interface; CI passes
+
+| BG-05
+| *Security by default* — every default deployment is encrypted and authenticated; insecure mode is explicit opt-in
+| Security audit finds zero unauthenticated endpoints in default configuration
+|===
+
+// ─────────────────────────────────────────────────────────────────────────────
+== 2. Stakeholders
+
+[cols="1,2,3,2"]
+|===
+| ID | Stakeholder | Goals & Concerns | Influence
+
+| SH-01
+| Application Developer
+| Fast integration, stable API, good SDK ergonomics, clear error messages
+| High — primary API consumer
+
+| SH-02
+| Device / Firmware Developer
+| Lightweight SDK, minimal RAM/flash, no complex setup, clear capability schema
+| High — produces device-side data
+
+| SH-03
+| Platform Operator
+| Simple deployment, Prometheus metrics, Kubernetes-ready, easy config
+| High — decides adoption
+
+| SH-04
+| Security Engineer
+| TLS everywhere, credential audit, no default open ports, SBOM
+| Medium — gates production approval
+
+| SH-05
+| Open Source Contributor
+| Clear CONTRIBUTING guide, pluggable interfaces, responsive maintainers
+| Medium — drives ecosystem growth
+
+| SH-06
+| End User
+| Reliable, fast, correct device data in their application
+| Low (indirect)
+|===
+
+// ─────────────────────────────────────────────────────────────────────────────
+== 3. System Scope
+
+=== 3.1 In Scope (v1)
+
+* UDAL Gateway: gRPC + REST API, Auth middleware, Message Router
+* Transport adapters: MQTT (3.1.1 + 5), HTTP (poll + webhook), CAN (SocketCAN)
+* Device Registry and Capability Registry (embedded bbolt)
+* SDKs: Go (device + app), Rust (embedded), Python (scripting), TypeScript (Node.js / browser)
+* Reflex Dashboard (reference web UI)
+* Deployment artefacts: single binary (amd64, arm64), Docker image, Helm chart
+
+=== 3.2 Out of Scope (v1)
+
+* Cloud-native SaaS management plane
+* AUTOSAR Classic BSW / safety-certified components
+* OPC-UA, BACnet, Zigbee, Modbus adapters
+* Built-in MQTT broker (external Mosquitto required)
+* ABAC (Attribute-Based Access Control) — post-v1
+* Device firmware OTA updates — post-v1 (see udal-automotive)
+
+=== 3.3 System Context Diagram
+
+See link:../../architecture.jsonc[architecture.jsonc] view `context`.
+
+// ─────────────────────────────────────────────────────────────────────────────
+== 4. Functional Requirements
+
+NOTE: Each requirement maps to an FR-NNN in link:../spec/SRS.adoc[SRS.adoc] for full detail and acceptance criteria.
+
+=== 4.1 Device Lifecycle
+
+[cols="1,2,3,1"]
+|===
+| ID | Name | Description | SRS Ref
+
+| F-01
+| Device Registration
+| A device registers itself by providing an ID and a capability schema reference. The gateway persists the entry and validates that the schema exists.
+| FR-001
+
+| F-02
+| Device Unregistration
+| A device or admin can unregister a device. The gateway removes it from the registry and closes any open subscriptions.
+| FR-001
+
+| F-03
+| Device Discovery
+| A client lists registered devices, optionally filtered by transport type, tag, or online status.
+| FR-006
+
+| F-04
+| Heartbeat / Online Status
+| The gateway tracks device last-seen timestamps. A device that misses N heartbeats transitions to offline. Clients can query online status.
+| FR-008
+|===
+
+=== 4.2 Data Access
+
+[cols="1,2,3,1"]
+|===
+| ID | Name | Description | SRS Ref
+
+| F-05
+| Property Read
+| A client reads the current value of a named device property. The gateway routes the request to the correct adapter and returns the typed value.
+| FR-002
+
+| F-06
+| Property Write
+| A client writes a value to a writable device property. The gateway validates the value type against the capability schema before forwarding.
+| FR-003
+
+| F-07
+| Command Dispatch
+| A client sends a named command with typed parameters to a device. The gateway forwards it via the device's transport adapter.
+| FR-004
+
+| F-08
+| Property Subscription
+| A client subscribes to real-time updates of a device property. The gateway fans out each property event to all active subscribers via gRPC server-side stream.
+| FR-005
+|===
+
+=== 4.3 Transport Adapters
+
+[cols="1,2,3,1"]
+|===
+| ID | Name | Description | SRS Ref
+
+| F-09
+| MQTT Adapter
+| Supports MQTT 3.1.1 and 5. Uses request/response topic pattern. Reconnects with exponential backoff. Circuit breaker on sustained errors.
+| FR-009
+
+| F-10
+| HTTP Adapter
+| Polls device HTTP endpoints at configurable intervals. Receives push events via webhook. Supports mTLS for device authentication.
+| FR-009
+
+| F-11
+| CAN Adapter
+| Reads and writes CAN frames via SocketCAN. Decodes frames to typed property values using DBC files or YAML signal maps.
+| FR-009
+
+| F-12
+| Pluggable Adapter Interface
+| Third-party adapters implement the `Transport` interface and are wired into the gateway via configuration. No gateway core changes required.
+| FR-009
+|===
+
+=== 4.4 Capability Schema
+
+[cols="1,2,3,1"]
+|===
+| ID | Name | Description | SRS Ref
+
+| F-13
+| Schema Publish
+| An operator publishes a capability schema (YAML/JSON) to the Capability Registry. Schemas are immutable once published; a new version creates a new entry.
+| FR-007
+
+| F-14
+| Schema Validation on Registration
+| The gateway rejects device registration if the declared schema reference does not exist in the Capability Registry.
+| FR-007
+
+| F-15
+| Property Type Validation
+| The gateway validates SetProperty values against the declared property type in the capability schema.
+| FR-003
+|===
+
+=== 4.5 Security
+
+[cols="1,2,3,1"]
+|===
+| ID | Name | Description | SRS Ref
+
+| F-16
+| API-Key Authentication
+| Clients include an API key in the `X-API-Key` header. The gateway validates the key against stored bcrypt hashes.
+| FR-010
+
+| F-17
+| mTLS Authentication
+| Clients present a TLS client certificate. The gateway validates it against the configured CA chain. Certificate CN becomes the identity.
+| FR-010
+
+| F-18
+| OAuth2 Device Flow (JWT)
+| Clients include a JWT Bearer token. The gateway validates signature via JWKS URL and checks `aud`, `exp`, `iss` claims.
+| FR-010
+
+| F-19
+| RBAC Authorisation
+| Every operation checks the caller's role (admin / operator / reader / device) against a role × operation permission matrix.
+| FR-011
+
+| F-20
+| Per-Device ACL
+| Per-device ACL entries override role-level permissions (allow or deny specific callers on specific devices).
+| FR-011
+|===
+
+=== 4.6 Observability
+
+[cols="1,2,3,1"]
+|===
+| ID | Name | Description | SRS Ref
+
+| F-21
+| Health Endpoint
+| `GET /health` returns HTTP 200 with JSON body when the gateway is healthy and ready to serve.
+| FR-008
+
+| F-22
+| Prometheus Metrics
+| `GET /metrics` exposes `udal_devices_online`, `udal_requests_total`, `udal_request_duration_seconds`, `udal_adapter_errors_total`.
+| FR-008
+
+| F-23
+| Structured Logging
+| All log output is JSON with fields: `timestamp`, `level`, `component`, `trace_id`, `device_id`, `error`.
+| —
+
+| F-24
+| OpenTelemetry Tracing
+| Trace context is created on every incoming request and propagated through all internal calls (router → adapter). OTLP exporter configurable.
+| —
+|===
+
+// ─────────────────────────────────────────────────────────────────────────────
+== 5. Quality Requirements
+
+=== 5.1 Quality Tree
+
+[source]
+----
+Quality
+├── Performance
+│   ├── QR-01  End-to-end latency < 50 ms p99
+│   └── QR-02  1,000 concurrent devices on standard hardware
+├── Reliability
+│   ├── QR-03  Graceful adapter degradation
+│   └── QR-04  No memory leaks under 1-hour soak
+├── Security
+│   ├── QR-05  TLS 1.2+ on all connections
+│   └── QR-06  Zero unauthenticated endpoints in default config
+├── Portability
+│   ├── QR-07  Single binary (amd64, arm64), Docker, Kubernetes
+│   └── QR-08  Rust SDK compiles with no_std for Cortex-M
+└── Maintainability
+    ├── QR-09  Third-party adapter without gateway core changes
+    └── QR-10  buf breaking check prevents silent API breakage
+----
+
+=== 5.2 Quality Scenarios
+
+[cols="1,2,3,2"]
+|===
+| ID | Stimulus | Response | Measure
+
+| QR-01
+| 100 concurrent clients each call GetProperty at 1 req/s with 1,000 MQTT devices connected
+| Gateway routes, adapter queries, value returned
+| p99 < 50 ms; measured by k6 load test
+
+| QR-02
+| 1,000 MQTT devices connected simultaneously, each publishing telemetry every 10 s
+| Gateway processes all events, fans out to subscribers
+| Heap < 500 MB; CPU < 70%; no goroutine leak after 30 min
+
+| QR-03
+| MQTT broker process killed without warning
+| MQTT adapter activates circuit breaker within 5 s; HTTP and CAN adapters unaffected
+| GetProperty for HTTP device returns OK within 1 s of broker failure
+
+| QR-04
+| Gateway runs under 500 devices × 50 req/s for 1 hour
+| No memory leak; all requests served
+| Heap growth < 10 MB over 1 hour (pprof snapshot before/after)
+
+| QR-05
+| Attacker sends TLS 1.0 ClientHello
+| Gateway rejects handshake
+| Connection closed before any data exchanged
+
+| QR-06
+| Client sends request with no credential
+| Auth middleware rejects immediately
+| HTTP 401 / gRPC UNAUTHENTICATED; no device state queried
+
+| QR-07
+| Operator runs `./udal-gateway --config gateway.yaml` on Raspberry Pi 4 (4 GB RAM, arm64)
+| Gateway starts and serves API
+| Start < 3 s; RAM at idle < 150 MB; no external services required
+
+| QR-08
+| Rust SDK compiled for Cortex-M4 with no_std + MQTT-only feature
+| SDK registers device, publishes property
+| Flash overhead < 8 KB; RAM overhead < 2 KB; compiles with arm-none-eabi
+
+| QR-09
+| Contributor adds J1939 adapter by implementing Transport interface
+| Adapter plugs in via config; gateway builds and passes CI
+| Zero changes to `gateway/` or `adapters/` core packages
+
+| QR-10
+| Developer renames a proto field in a PR
+| buf breaking check in CI fails with clear error before merge
+| Breaking change blocked; developer notified with field name and message
+|===
+
+// ─────────────────────────────────────────────────────────────────────────────
+== 6. Constraints
+
+=== 6.1 Technical Constraints
+
+[cols="1,3,2"]
+|===
+| ID | Constraint | Impact
+
+| TC-01
+| Linux ≥ 5.10 required for CAN adapter (SocketCAN)
+| macOS and Windows not supported for CAN in v1; documented in README
+
+| TC-02
+| No mandatory external database (bbolt embedded store)
+| Simplifies edge deployment; limits to embedded-DB performance at > 10,000 devices (v2 concern)
+
+| TC-03
+| TLS mandatory; plain-text only via explicit `--dev` flag
+| Certificates must be provisioned before first start (cert-manager or self-signed for dev)
+
+| TC-04
+| Protobuf as the API contract
+| All API changes go through proto files; REST clients use generated grpc-gateway proxy
+
+| TC-05
+| Go ≥ 1.22, Rust stable, Python ≥ 3.12, Node.js ≥ 20
+| Minimum versions enforced in CI; older toolchains not supported
+|===
+
+=== 6.2 Organisational Constraints
+
+[cols="1,3,2"]
+|===
+| ID | Constraint | Impact
+
+| OC-01
+| Apache 2.0 licence
+| All dependencies must be Apache-2.0, MIT, or BSD compatible
+
+| OC-02
+| Conventional Commits on all merged commits
+| Enforced by CI commit-lint step; enables automatic changelog
+
+| OC-03
+| All architecture changes require `architecture.jsonc` update + ADR
+| See CONTRIBUTING.md §Architecture Changes
+
+| OC-04
+| No vendored dependencies
+| Go modules, Cargo, pip, npm manage dependency versions
+|===
+
+=== 6.3 Regulatory / Compliance Constraints
+
+[cols="1,3"]
+|===
+| ID | Constraint
+
+| RC-01
+| GDPR: UDAL must not store personally identifiable information in device properties unless explicitly configured. Device IDs are considered pseudonymous identifiers.
+
+| RC-02
+| SBOM: a Software Bill of Materials (CycloneDX format) must be generated for each release artefact.
+|===

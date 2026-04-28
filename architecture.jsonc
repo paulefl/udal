@@ -235,6 +235,12 @@
           "title": "TypeScript SDK",
           "description": "SDK for web frontends and Node.js backend services consuming UDAL",
           "technology": "TypeScript, Node.js"
+        },
+        "dashboard": {
+          "kind": "library",
+          "title": "Reflex Dashboard",
+          "description": "Reference web dashboard built with Python Reflex — device monitoring, property browser, live telemetry. Uses Python SDK internally, compiles to React.",
+          "technology": "Python, Reflex"
         }
       }
     }
@@ -278,6 +284,8 @@
     { "from": "sdks.sdk_rust",       "to": "mqtt_broker",            "label": "MQTT (embedded)",   "kind": "uses" },
     { "from": "sdks.sdk_python",     "to": "gateway.api.rest",       "label": "REST",              "kind": "calls" },
     { "from": "sdks.sdk_typescript", "to": "gateway.api.rest",       "label": "REST / WebSocket",  "kind": "calls" },
+    { "from": "sdks.dashboard",      "to": "sdks.sdk_python",        "label": "uses",              "kind": "uses" },
+    { "from": "operator",            "to": "sdks.dashboard",         "label": "monitor devices",   "kind": "uses" },
 
     // Operator
     { "from": "operator",            "to": "gateway.health",         "label": "monitor metrics",   "kind": "uses" }
