@@ -74,7 +74,6 @@
     "ScalarTypeDef": {
       "type": "object",
       "required": ["type"],
-      "additionalProperties": false,
       "properties": {
         "type":        { "type": "string", "enum": ["bool", "int", "float", "string", "bytes"] },
         "description": { "type": "string" },
@@ -88,7 +87,6 @@
     "EnumTypeDef": {
       "type": "object",
       "required": ["type", "values"],
-      "additionalProperties": false,
       "properties": {
         "type":        { "type": "string", "const": "enum" },
         "values":      { "type": "array", "items": { "type": "string" }, "minItems": 1 },
@@ -100,7 +98,6 @@
     "ArrayTypeDef": {
       "type": "object",
       "required": ["type", "items"],
-      "additionalProperties": false,
       "properties": {
         "type":        { "type": "string", "const": "array" },
         "items":       { "$ref": "#/$defs/TypeDef" },
@@ -113,7 +110,6 @@
     "ObjectTypeDef": {
       "type": "object",
       "required": ["type", "properties"],
-      "additionalProperties": false,
       "properties": {
         "type":       { "type": "string", "const": "object" },
         "properties": { "type": "object", "additionalProperties": { "$ref": "#/$defs/TypeDef" } },
@@ -125,7 +121,6 @@
     "RefTypeDef": {
       "type": "object",
       "required": ["$ref"],
-      "additionalProperties": false,
       "properties": {
         "$ref":        { "type": "string", "description": "JSON Pointer to a definition in #/definitions." },
         "description": { "type": "string" }
@@ -143,7 +138,8 @@
             "writeOnly": { "type": "boolean", "default": false }
           }
         }
-      ]
+      ],
+      "unevaluatedProperties": false
     },
 
     "ParamDef": {
@@ -156,7 +152,8 @@
             "required": { "type": "boolean", "default": false }
           }
         }
-      ]
+      ],
+      "unevaluatedProperties": false
     },
 
     "CommandDef": {

@@ -24,6 +24,7 @@ jobs:
       proto:        ${{ steps.filter.outputs.proto }}
       docker:       ${{ steps.filter.outputs.docker }}
       architecture: ${{ steps.filter.outputs.architecture }}
+      schema:       ${{ steps.filter.outputs.schema }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -61,6 +62,8 @@ jobs:
               - 'Dockerfile'
             architecture:
               - 'architecture.jsonc'
+            schema:
+              - 'schema/**'
 
 # ─── Go: Build + Test + Lint + Security ──────────────────────────────────────
   go-build-test:
@@ -345,6 +348,28 @@ jobs:
             exit 1
           fi
 
+# ─── Capability Schema Validation ────────────────────────────────────────────
+  schema-validate:
+    name: Schema — Validate capability examples
+    needs: changes
+    if: needs.changes.outputs.schema == 'true' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install check-jsonschema
+        run: pip install check-jsonschema
+
+      - name: Validate all examples against meta-schema
+        run: |
+          check-jsonschema \
+            --schemafile schema/udal-capability.schema.json \
+            schema/examples/*.json
+
 # ─── Architecture Validation ──────────────────────────────────────────────────
   architecture-validate:
     name: Architecture — Validate Bausteinsicht model
@@ -377,6 +402,7 @@ jobs:
       - typescript-ci
       - proto-ci
       - docker-build
+      - schema-validate
       - architecture-validate
     if: always()
     runs-on: ubuntu-latest
