@@ -128,7 +128,8 @@ jobs:
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
 
       - name: Run govulncheck
-        run: govulncheck ./gateway/...
+        run: govulncheck ./...
+        working-directory: gateway
 
 # ─── Go: Integration Tests (MQTT via Docker) ──────────────────────────────────
   go-integration:
@@ -309,7 +310,13 @@ jobs:
 
       - name: Breaking change check (against main)
         if: github.event_name == 'pull_request'
-        run: buf breaking api/proto --against "https://github.com/${{ github.repository }}.git#branch=main,subdir=api/proto"
+        run: |
+          git fetch origin main --depth=1 2>/dev/null || true
+          if git ls-tree origin/main -- api/proto/ 2>/dev/null | grep -q '\.proto'; then
+            buf breaking api/proto --against "https://github.com/${{ github.repository }}.git#branch=main,subdir=api/proto"
+          else
+            echo "No proto files on main yet — skipping breaking change check."
+          fi
 
       - name: Generate Go stubs (verify compilable)
         run: buf generate api/proto

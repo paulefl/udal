@@ -100,9 +100,11 @@ func TestListDevices(t *testing.T) {
 		{"s2", "temperature-sensor", "mqtt"},
 		{"c1", "ip-camera", "http"},
 	} {
-		svc.RegisterDevice(context.Background(), &udalv1.RegisterDeviceRequest{
+		if _, err := svc.RegisterDevice(context.Background(), &udalv1.RegisterDeviceRequest{
 			Name: d.name, Capability: d.cap, Transport: d.tr,
-		})
+		}); err != nil {
+			t.Fatalf("RegisterDevice %s: %v", d.name, err)
+		}
 	}
 
 	all, _ := svc.ListDevices(context.Background(), &udalv1.ListDevicesRequest{})

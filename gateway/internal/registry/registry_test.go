@@ -58,9 +58,15 @@ func TestGet(t *testing.T) {
 
 func TestList(t *testing.T) {
 	r := registry.NewMemoryRegistry()
-	r.Register(newDevice("s1", "temperature-sensor", "mqtt"))
-	r.Register(newDevice("s2", "temperature-sensor", "mqtt"))
-	r.Register(newDevice("c1", "ip-camera", "http"))
+	if _, err := r.Register(newDevice("s1", "temperature-sensor", "mqtt")); err != nil {
+		t.Fatalf("Register s1: %v", err)
+	}
+	if _, err := r.Register(newDevice("s2", "temperature-sensor", "mqtt")); err != nil {
+		t.Fatalf("Register s2: %v", err)
+	}
+	if _, err := r.Register(newDevice("c1", "ip-camera", "http")); err != nil {
+		t.Fatalf("Register c1: %v", err)
+	}
 
 	all, _ := r.List("", "")
 	if len(all) != 3 {

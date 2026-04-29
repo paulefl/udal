@@ -33,8 +33,12 @@ func TestMemoryPropertyStore_GetMissing(t *testing.T) {
 
 func TestMemoryPropertyStore_Overwrite(t *testing.T) {
 	s := api.NewMemoryPropertyStore()
-	s.Set("dev-1", "temperature", api.FloatValue(20.0))
-	s.Set("dev-1", "temperature", api.FloatValue(25.0))
+	if err := s.Set("dev-1", "temperature", api.FloatValue(20.0)); err != nil {
+		t.Fatalf("Set 20.0: %v", err)
+	}
+	if err := s.Set("dev-1", "temperature", api.FloatValue(25.0)); err != nil {
+		t.Fatalf("Set 25.0: %v", err)
+	}
 
 	got, _ := s.Get("dev-1", "temperature")
 	if got.FloatVal == nil || *got.FloatVal != 25.0 {
