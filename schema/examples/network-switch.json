@@ -1,0 +1,158 @@
+{
+  "udal": "1.0",
+  "kind": "DeviceCapability",
+  "metadata": {
+    "name": "network-switch",
+    "version": "1.0.0",
+    "description": "Managed Ethernet switch with per-port statistics, VLAN configuration, and PoE",
+    "tags": ["network", "http", "ethernet", "infrastructure", "poe"]
+  },
+
+  "definitions": {
+    "port_stats": {
+      "type": "object",
+      "properties": {
+        "port_id":        { "type": "int" },
+        "link_up":        { "type": "bool" },
+        "speed_mbps":     { "type": "int", "unit": "Mbps" },
+        "duplex":         { "type": "enum", "values": ["half", "full", "unknown"] },
+        "rx_bytes":       { "type": "int", "unit": "bytes" },
+        "tx_bytes":       { "type": "int", "unit": "bytes" },
+        "rx_errors":      { "type": "int" },
+        "tx_errors":      { "type": "int" },
+        "poe_power_w":    { "type": "float", "unit": "W", "description": "PoE draw; 0.0 if not powered or no PoE" }
+      },
+      "required": ["port_id", "link_up"]
+    },
+    "vlan_config": {
+      "type": "object",
+      "properties": {
+        "vlan_id":        { "type": "int", "min": 1, "max": 4094 },
+        "name":           { "type": "string" },
+        "tagged_ports":   { "type": "array", "items": { "type": "int" } },
+        "untagged_ports": { "type": "array", "items": { "type": "int" } }
+      },
+      "required": ["vlan_id"]
+    }
+  },
+
+  "properties": {
+    "port_count": {
+      "type": "int",
+      "readOnly": true,
+      "description": "Total number of data ports"
+    },
+    "poe_supported": {
+      "type": "bool",
+      "readOnly": true
+    },
+    "poe_budget_w": {
+      "type": "float",
+      "unit": "W",
+      "readOnly": true,
+      "description": "Total PoE power budget of the switch; 0 if poe_supported = false"
+    },
+    "hostname": {
+      "type": "string"
+    },
+    "firmware_version": {
+      "type": "string",
+      "readOnly": true
+    },
+    "uptime_s": {
+      "type": "int",
+      "unit": "seconds",
+      "readOnly": true
+    },
+    "ports": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/port_stats" },
+      "readOnly": true,
+      "description": "Live statistics for every port"
+    },
+    "vlans": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/vlan_config" },
+      "description": "Active VLAN configuration"
+    },
+    "stp_enabled": {
+      "type": "bool",
+      "default": true,
+      "description": "Spanning Tree Protocol (802.1D) enabled"
+    },
+    "lldp_enabled": {
+      "type": "bool",
+      "default": true
+    }
+  },
+
+  "commands": {
+    "set_port_enabled": {
+      "description": "Administratively enable or disable a port",
+      "params": {
+        "port_id": { "type": "int", "required": true },
+        "enabled": { "type": "bool", "required": true }
+      },
+      "returns": { "type": "bool" }
+    },
+    "set_poe_enabled": {
+      "description": "Enable or disable PoE power delivery on a port",
+      "params": {
+        "port_id": { "type": "int", "required": true },
+        "enabled": { "type": "bool", "required": true }
+      },
+      "returns": { "type": "bool" }
+    },
+    "clear_port_stats": {
+      "description": "Reset rx/tx byte and error counters for a port",
+      "params": {
+        "port_id": { "type": "int", "description": "Omit to reset all ports" }
+      }
+    },
+    "apply_vlan_config": {
+      "description": "Push a full VLAN configuration (replaces existing)",
+      "params": {
+        "vlans": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/vlan_config" },
+          "required": true
+        }
+      },
+      "returns": { "type": "bool" }
+    },
+    "save_config": {
+      "description": "Persist running configuration to startup config",
+      "params": {}
+    },
+    "reboot": {
+      "description": "Reboot the switch",
+      "params": {}
+    }
+  },
+
+  "events": {
+    "link_changed": {
+      "description": "Emitted when a port link state transitions",
+      "payload": {
+        "port_id":    { "type": "int" },
+        "link_up":    { "type": "bool" },
+        "speed_mbps": { "type": "int", "unit": "Mbps" }
+      }
+    },
+    "poe_overload": {
+      "description": "Emitted when total PoE draw exceeds the budget or a port draw exceeds its limit",
+      "payload": {
+        "port_id":       { "type": "int", "description": "-1 for budget-level overload" },
+        "current_draw_w": { "type": "float", "unit": "W" },
+        "limit_w":        { "type": "float", "unit": "W" }
+      }
+    },
+    "config_changed": {
+      "description": "Emitted when the running configuration is modified via any interface",
+      "payload": {
+        "changed_by": { "type": "string", "description": "User or API client identifier" },
+        "section":    { "type": "enum", "values": ["vlan", "port", "stp", "lldp", "poe", "other"] }
+      }
+    }
+  }
+}

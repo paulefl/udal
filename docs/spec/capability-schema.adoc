@@ -1,0 +1,323 @@
+= UDAL Capability Schema Specification
+:toc:
+:toc-placement: left
+:source-highlighter: highlight.js
+
+== Overview
+
+A *Capability Schema* describes what an IoT device can do — its properties, commands, and events — in a transport-agnostic, machine-readable JSON format.
+UDAL uses capability schemas to:
+
+* validate incoming and outgoing payloads at the gateway boundary;
+* auto-generate API stubs for application SDKs;
+* render human-readable device documentation.
+
+The meta-schema lives at `schema/udal-capability.schema.json` (JSON Schema Draft 2020-12).
+Example schemas are in `schema/examples/`.
+
+---
+
+== Document Root
+
+Every capability file must be a JSON object with the following top-level keys:
+
+[cols="1,1,1,3",options="header"]
+|===
+| Field | Type | Required | Description
+| `udal` | string | yes | Schema format version. Must be `"1.0"`.
+| `kind` | string | yes | Must be `"DeviceCapability"`.
+| `metadata` | object | yes | Descriptive information — see <<metadata>>.
+| `definitions` | object | no | Reusable named type definitions referenced via `$ref`.
+| `properties` | object | no | Device state properties (read/write values).
+| `commands` | object | no | Requests that can be sent to the device.
+| `events` | object | no | Notifications the device emits asynchronously.
+|===
+
+=== Metadata [[metadata]]
+
+[cols="1,1,1,3",options="header"]
+|===
+| Field | Type | Required | Description
+| `name` | string | yes | Machine-readable identifier. Pattern: `^[a-z][a-z0-9-]*$`.
+| `version` | string | yes | Semantic version (`MAJOR.MINOR.PATCH`).
+| `description` | string | no | Human-readable summary.
+| `author` | string | no | Maintainer contact.
+| `tags` | array of string | no | Categorisation tags for discovery.
+|===
+
+---
+
+== Type System
+
+Every value in properties, command parameters, command returns, and event payloads is described by a *TypeDef*.
+There are five variants, selected by the `type` field (or by the presence of `$ref`).
+
+=== Scalar Types
+
+[cols="1,3",options="header"]
+|===
+| `type` value | Description
+| `bool`   | Boolean (`true` / `false`)
+| `int`    | 64-bit signed integer
+| `float`  | 64-bit IEEE 754 double
+| `string` | UTF-8 text
+| `bytes`  | Raw binary (base64-encoded in JSON transport)
+|===
+
+Optional fields on scalar types:
+
+[cols="1,1,3",options="header"]
+|===
+| Field | Applies to | Description
+| `unit` | int, float | Engineering unit label (e.g. `"celsius"`, `"kWh"`, `"kbps"`).
+| `min` | int, float | Inclusive lower bound.
+| `max` | int, float | Inclusive upper bound.
+| `default` | any scalar | Default value used when the property is not yet set.
+| `description` | any | Free-text explanation.
+|===
+
+=== Enum Type
+
+[source,json]
+----
+{ "type": "enum", "values": ["on", "off", "auto"], "default": "auto" }
+----
+
+`values` must contain at least one string. `default` must be one of the listed values.
+
+=== Array Type
+
+[source,json]
+----
+{
+  "type": "array",
+  "items": { "type": "float" },
+  "minItems": 1,
+  "maxItems": 32
+}
+----
+
+`items` is itself a TypeDef (any variant, including nested arrays or `$ref`).
+
+=== Object Type
+
+[source,json]
+----
+{
+  "type": "object",
+  "properties": {
+    "x": { "type": "float" },
+    "y": { "type": "float" }
+  },
+  "required": ["x", "y"]
+}
+----
+
+`properties` maps field names to TypeDefs.
+`required` lists field names that must be present; all others are optional.
+
+Object types are most useful inside `definitions` so they can be referenced from multiple places.
+
+=== $ref Type
+
+[source,json]
+----
+{ "$ref": "#/definitions/threshold" }
+----
+
+`$ref` must be a JSON Pointer that resolves to a key inside the top-level `definitions` object.
+Only intra-document references are supported in v1.
+
+---
+
+== Definitions Section
+
+The optional `definitions` object holds named, reusable TypeDefs.
+Any TypeDef variant may appear as a definition value.
+
+[source,json]
+----
+"definitions": {
+  "threshold": {
+    "type": "object",
+    "properties": {
+      "enabled":   { "type": "bool" },
+      "value":     { "type": "float" },
+      "direction": { "type": "enum", "values": ["above", "below"] }
+    },
+    "required": ["enabled", "value", "direction"]
+  }
+}
+----
+
+Reference it anywhere a TypeDef is accepted:
+
+[source,json]
+----
+"properties": {
+  "temp_threshold": { "$ref": "#/definitions/threshold" }
+}
+----
+
+---
+
+== Properties Section
+
+Properties represent device state that can be read and/or written.
+Each key is the property name; the value is a *PropertyDef*: a TypeDef extended with:
+
+[cols="1,1,3",options="header"]
+|===
+| Field | Type | Description
+| `readOnly` | bool | Clients may not write this property. Default: `false`.
+| `writeOnly` | bool | Value is never returned in read responses (e.g. passwords). Default: `false`.
+|===
+
+[source,json]
+----
+"properties": {
+  "temperature": {
+    "type": "float",
+    "unit": "celsius",
+    "readOnly": true,
+    "min": -40.0,
+    "max": 125.0
+  },
+  "sample_interval_s": {
+    "type": "int",
+    "unit": "seconds",
+    "min": 1,
+    "max": 3600,
+    "default": 30
+  }
+}
+----
+
+---
+
+== Commands Section
+
+Commands are RPC-style requests sent to the device.
+Each key is the command name; the value is a *CommandDef*:
+
+[cols="1,1,3",options="header"]
+|===
+| Field | Type | Description
+| `description` | string | Human-readable summary.
+| `params` | object | Map of parameter names to *ParamDef*. May be empty.
+| `returns` | TypeDef | Type of the response payload. Omit if the command has no response.
+|===
+
+A *ParamDef* is a TypeDef extended with:
+
+[cols="1,1,3",options="header"]
+|===
+| Field | Type | Description
+| `required` | bool | Whether the caller must supply this parameter. Default: `false`.
+|===
+
+[source,json]
+----
+"commands": {
+  "calibrate": {
+    "description": "Apply an offset to temperature readings",
+    "params": {
+      "offset": { "type": "float", "unit": "celsius", "required": true }
+    },
+    "returns": { "type": "bool" }
+  },
+  "reboot": {
+    "description": "Reboot the device",
+    "params": {}
+  }
+}
+----
+
+---
+
+== Events Section
+
+Events are asynchronous notifications emitted by the device.
+Each key is the event name; the value is an *EventDef*:
+
+[cols="1,1,3",options="header"]
+|===
+| Field | Type | Description
+| `description` | string | Human-readable summary.
+| `payload` | object | Map of field names to TypeDefs. May be empty.
+|===
+
+[source,json]
+----
+"events": {
+  "threshold_exceeded": {
+    "description": "Emitted when a sensor value crosses its threshold",
+    "payload": {
+      "sensor":    { "type": "enum", "values": ["temperature", "humidity"] },
+      "value":     { "type": "float" },
+      "threshold": { "type": "float" },
+      "direction": { "type": "enum", "values": ["above", "below"] }
+    }
+  }
+}
+----
+
+---
+
+== Full Example
+
+[source,json]
+----
+include::../../schema/examples/temperature-sensor.json[]
+----
+
+Additional examples:
+
+* link:../../schema/examples/ip-camera.json[ip-camera.json] — HTTP/REST device, RTSP streaming, motion detection
+* link:../../schema/examples/smart-pdu.json[smart-pdu.json] — HTTP/REST, per-outlet metering and switching
+* link:../../schema/examples/network-switch.json[network-switch.json] — Network infrastructure, VLAN, PoE
+* link:../../schema/examples/modbus-tcp-io.json[modbus-tcp-io.json] — Industrial Ethernet / Modbus TCP I/O
+* link:../../schema/examples/motor-controller.json[motor-controller.json] — CAN / CANopen DS402 servo drive
+
+---
+
+== Validation
+
+The meta-schema can be used with any JSON Schema Draft 2020-12 validator.
+
+[source,bash]
+----
+# Using check-jsonschema (pip install check-jsonschema)
+check-jsonschema \
+  --schemafile schema/udal-capability.schema.json \
+  schema/examples/temperature-sensor.json
+
+# Using ajv-cli (npm install -g ajv-cli ajv-formats)
+ajv validate \
+  -s schema/udal-capability.schema.json \
+  -d "schema/examples/*.json" \
+  --spec=draft2020
+----
+
+The UDAL CI pipeline validates all files under `schema/examples/` automatically on every push.
+
+---
+
+== Versioning
+
+The `udal` field in every document pins the schema format version.
+The current version is `"1.0"`.
+
+When breaking changes are required, the minor version increments (`"1.1"`, `"2.0"`, …) and the meta-schema gains a new `const` option.
+Existing `"1.0"` files remain valid against the `"1.0"` meta-schema.
+
+---
+
+== Registry Integration
+
+When a capability schema is registered with the UDAL Gateway Capability Registry:
+
+1. The gateway validates the file against the meta-schema.
+2. The schema is stored in bbolt under key `capability/<name>/<version>`.
+3. All devices that declare this capability receive payload validation on every property write, command call, and event emit.
+4. SDK code generators use the stored schema to produce typed stubs.

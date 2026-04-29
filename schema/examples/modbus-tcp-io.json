@@ -1,0 +1,192 @@
+{
+  "udal": "1.0",
+  "kind": "DeviceCapability",
+  "metadata": {
+    "name": "modbus-tcp-io",
+    "version": "1.0.0",
+    "description": "Modbus TCP remote I/O module — digital inputs/outputs and analog I/O channels",
+    "tags": ["modbus", "industrial", "io", "ethernet"]
+  },
+
+  "definitions": {
+    "digital_input": {
+      "type": "object",
+      "properties": {
+        "channel":    { "type": "int" },
+        "state":      { "type": "bool" },
+        "inverted":   { "type": "bool", "description": "True if physical signal is active-low" },
+        "label":      { "type": "string" }
+      },
+      "required": ["channel", "state"]
+    },
+    "digital_output": {
+      "type": "object",
+      "properties": {
+        "channel":    { "type": "int" },
+        "state":      { "type": "bool" },
+        "label":      { "type": "string" }
+      },
+      "required": ["channel", "state"]
+    },
+    "analog_input": {
+      "type": "object",
+      "properties": {
+        "channel":    { "type": "int" },
+        "raw":        { "type": "int",   "description": "Raw 16-bit ADC value (0–65535)" },
+        "value":      { "type": "float", "description": "Scaled engineering-unit value" },
+        "unit":       { "type": "string" },
+        "range":      { "type": "enum",  "values": ["0-10V", "0-20mA", "4-20mA", "±10V"] },
+        "label":      { "type": "string" }
+      },
+      "required": ["channel", "raw", "value"]
+    },
+    "analog_output": {
+      "type": "object",
+      "properties": {
+        "channel":    { "type": "int" },
+        "value":      { "type": "float", "description": "Setpoint in engineering units" },
+        "unit":       { "type": "string" },
+        "range":      { "type": "enum",  "values": ["0-10V", "0-20mA", "4-20mA"] },
+        "label":      { "type": "string" }
+      },
+      "required": ["channel", "value"]
+    }
+  },
+
+  "properties": {
+    "device_id": {
+      "type": "int",
+      "readOnly": true,
+      "description": "Modbus unit identifier (1–247)"
+    },
+    "di_count": {
+      "type": "int",
+      "readOnly": true,
+      "description": "Number of digital input channels"
+    },
+    "do_count": {
+      "type": "int",
+      "readOnly": true,
+      "description": "Number of digital output channels"
+    },
+    "ai_count": {
+      "type": "int",
+      "readOnly": true,
+      "description": "Number of analog input channels"
+    },
+    "ao_count": {
+      "type": "int",
+      "readOnly": true,
+      "description": "Number of analog output channels"
+    },
+    "digital_inputs": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/digital_input" },
+      "readOnly": true
+    },
+    "digital_outputs": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/digital_output" }
+    },
+    "analog_inputs": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/analog_input" },
+      "readOnly": true
+    },
+    "analog_outputs": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/analog_output" }
+    },
+    "poll_interval_ms": {
+      "type": "int",
+      "unit": "ms",
+      "min": 10,
+      "max": 60000,
+      "default": 100,
+      "description": "How often the gateway polls all registers"
+    },
+    "watchdog_timeout_ms": {
+      "type": "int",
+      "unit": "ms",
+      "min": 0,
+      "max": 30000,
+      "default": 5000,
+      "description": "Safe-state timeout; 0 = disabled"
+    },
+    "safe_state_do": {
+      "type": "array",
+      "items": { "type": "bool" },
+      "description": "Digital output states applied on watchdog timeout; length must equal do_count"
+    }
+  },
+
+  "commands": {
+    "write_do": {
+      "description": "Set one or more digital output channels",
+      "params": {
+        "channel": { "type": "int",  "required": true,
+                     "description": "Output channel index (0-based)" },
+        "state":   { "type": "bool", "required": true }
+      },
+      "returns": { "type": "bool" }
+    },
+    "write_ao": {
+      "description": "Set an analog output to the given engineering-unit value",
+      "params": {
+        "channel": { "type": "int",   "required": true },
+        "value":   { "type": "float", "required": true }
+      },
+      "returns": { "type": "bool" }
+    },
+    "reset_watchdog": {
+      "description": "Reset the watchdog timer (must be called within watchdog_timeout_ms)",
+      "params": {}
+    },
+    "read_registers": {
+      "description": "Low-level Modbus register read (function code 3 or 4)",
+      "params": {
+        "function_code": { "type": "int",  "min": 3, "max": 4, "required": true },
+        "start_address": { "type": "int",  "required": true },
+        "count":         { "type": "int",  "min": 1, "max": 125, "required": true }
+      },
+      "returns": {
+        "type": "array",
+        "items": { "type": "int" },
+        "description": "Raw 16-bit register values"
+      }
+    }
+  },
+
+  "events": {
+    "di_changed": {
+      "description": "Emitted when a digital input transitions",
+      "payload": {
+        "channel":   { "type": "int" },
+        "new_state": { "type": "bool" },
+        "old_state": { "type": "bool" }
+      }
+    },
+    "ai_threshold_exceeded": {
+      "description": "Emitted when an analog input crosses a configured hi/lo limit",
+      "payload": {
+        "channel":   { "type": "int" },
+        "value":     { "type": "float" },
+        "limit":     { "type": "float" },
+        "direction": { "type": "enum", "values": ["above", "below"] }
+      }
+    },
+    "watchdog_triggered": {
+      "description": "Emitted when the watchdog fires and safe state is applied",
+      "payload": {
+        "last_reset_age_ms": { "type": "int", "unit": "ms" }
+      }
+    },
+    "comms_error": {
+      "description": "Emitted when a Modbus TCP transaction fails (timeout or exception)",
+      "payload": {
+        "error_code":    { "type": "int",    "description": "Modbus exception code, or -1 for timeout" },
+        "error_message": { "type": "string" }
+      }
+    }
+  }
+}

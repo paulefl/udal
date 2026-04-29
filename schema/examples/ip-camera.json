@@ -1,0 +1,133 @@
+{
+  "udal": "1.0",
+  "kind": "DeviceCapability",
+  "metadata": {
+    "name": "ip-camera",
+    "version": "1.0.0",
+    "description": "IP camera with RTSP streaming, snapshot, and motion detection",
+    "tags": ["camera", "http", "video", "security"]
+  },
+
+  "definitions": {
+    "resolution": {
+      "type": "object",
+      "properties": {
+        "width":  { "type": "int" },
+        "height": { "type": "int" }
+      },
+      "required": ["width", "height"]
+    },
+    "rect": {
+      "type": "object",
+      "properties": {
+        "x":      { "type": "int", "description": "Left edge in pixels" },
+        "y":      { "type": "int", "description": "Top edge in pixels" },
+        "width":  { "type": "int" },
+        "height": { "type": "int" }
+      },
+      "required": ["x", "y", "width", "height"]
+    }
+  },
+
+  "properties": {
+    "stream_url": {
+      "type": "string",
+      "readOnly": true,
+      "description": "RTSP URL of the main video stream"
+    },
+    "resolution": {
+      "$ref": "#/definitions/resolution",
+      "description": "Current capture resolution"
+    },
+    "fps": {
+      "type": "int",
+      "unit": "frames per second",
+      "min": 1,
+      "max": 60,
+      "default": 25
+    },
+    "bitrate_kbps": {
+      "type": "int",
+      "unit": "kbps",
+      "min": 64,
+      "max": 16000,
+      "default": 2000
+    },
+    "codec": {
+      "type": "enum",
+      "values": ["h264", "h265", "mjpeg"],
+      "default": "h264"
+    },
+    "night_mode": {
+      "type": "enum",
+      "values": ["off", "on", "auto"],
+      "default": "auto"
+    },
+    "motion_detection_enabled": {
+      "type": "bool",
+      "default": false
+    },
+    "motion_sensitivity": {
+      "type": "int",
+      "min": 0,
+      "max": 100,
+      "default": 50,
+      "description": "0 = disabled, 100 = maximum sensitivity"
+    },
+    "motion_zones": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/rect" },
+      "maxItems": 8,
+      "description": "Pixel rectangles that trigger motion events; empty means full frame"
+    },
+    "ptz_supported": {
+      "type": "bool",
+      "readOnly": true,
+      "description": "Whether pan-tilt-zoom is available"
+    }
+  },
+
+  "commands": {
+    "snapshot": {
+      "description": "Capture a JPEG snapshot and return it as base64-encoded bytes",
+      "params": {
+        "resolution": { "$ref": "#/definitions/resolution" }
+      },
+      "returns": { "type": "bytes" }
+    },
+    "ptz_move": {
+      "description": "Move the camera head (only valid when ptz_supported = true)",
+      "params": {
+        "pan":  { "type": "float", "unit": "degrees", "min": -180.0, "max": 180.0, "required": true },
+        "tilt": { "type": "float", "unit": "degrees", "min": -90.0,  "max": 90.0,  "required": true },
+        "zoom": { "type": "float", "min": 1.0, "max": 30.0 }
+      },
+      "returns": { "type": "bool" }
+    },
+    "reboot": {
+      "description": "Reboot the camera",
+      "params": {}
+    },
+    "factory_reset": {
+      "description": "Restore factory defaults and reboot",
+      "params": {}
+    }
+  },
+
+  "events": {
+    "motion_detected": {
+      "description": "Emitted when movement is detected in a monitored zone",
+      "payload": {
+        "zone_index": { "type": "int", "description": "-1 means full-frame trigger" },
+        "score":      { "type": "float", "description": "Confidence 0..1" },
+        "snapshot_url": { "type": "string", "description": "Temporary URL to JPEG snapshot" }
+      }
+    },
+    "stream_interrupted": {
+      "description": "Emitted when the RTSP stream drops unexpectedly",
+      "payload": {
+        "reason": { "type": "string" }
+      }
+    }
+  }
+}

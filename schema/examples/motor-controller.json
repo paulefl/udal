@@ -1,0 +1,213 @@
+{
+  "udal": "1.0",
+  "kind": "DeviceCapability",
+  "metadata": {
+    "name": "motor-controller",
+    "version": "1.0.0",
+    "description": "Servo/stepper motor controller over CAN (CANopen DS301 / DS402 profile)",
+    "tags": ["motor", "can", "canopen", "motion", "industrial"]
+  },
+
+  "definitions": {
+    "position": {
+      "type": "object",
+      "properties": {
+        "value": { "type": "float" },
+        "unit":  { "type": "enum", "values": ["steps", "degrees", "mm", "revolutions"] }
+      },
+      "required": ["value", "unit"]
+    },
+    "velocity": {
+      "type": "object",
+      "properties": {
+        "value": { "type": "float" },
+        "unit":  { "type": "enum", "values": ["rpm", "steps_per_s", "mm_per_s"] }
+      },
+      "required": ["value", "unit"]
+    },
+    "fault_record": {
+      "type": "object",
+      "properties": {
+        "timestamp_ms": { "type": "int",    "description": "Controller uptime in ms when fault occurred" },
+        "code":         { "type": "int",    "description": "DS402 fault code" },
+        "description":  { "type": "string" }
+      },
+      "required": ["timestamp_ms", "code"]
+    }
+  },
+
+  "properties": {
+    "node_id": {
+      "type": "int",
+      "readOnly": true,
+      "min": 1,
+      "max": 127,
+      "description": "CANopen node ID"
+    },
+    "state_machine": {
+      "type": "enum",
+      "values": [
+        "not_ready",
+        "switch_on_disabled",
+        "ready_to_switch_on",
+        "switched_on",
+        "operation_enabled",
+        "quick_stop_active",
+        "fault_reaction_active",
+        "fault"
+      ],
+      "readOnly": true,
+      "description": "DS402 state machine state"
+    },
+    "operation_mode": {
+      "type": "enum",
+      "values": ["profile_position", "velocity", "profile_velocity", "torque", "homing"],
+      "description": "Active DS402 operation mode"
+    },
+    "actual_position": {
+      "$ref": "#/definitions/position",
+      "description": "Current encoder position"
+    },
+    "actual_velocity": {
+      "$ref": "#/definitions/velocity",
+      "description": "Current shaft velocity"
+    },
+    "actual_torque_nm": {
+      "type": "float",
+      "unit": "Nm",
+      "readOnly": true
+    },
+    "actual_current_a": {
+      "type": "float",
+      "unit": "A",
+      "readOnly": true
+    },
+    "temperature_c": {
+      "type": "float",
+      "unit": "celsius",
+      "readOnly": true,
+      "description": "Drive heatsink temperature"
+    },
+    "dc_link_voltage_v": {
+      "type": "float",
+      "unit": "V",
+      "readOnly": true
+    },
+    "homed": {
+      "type": "bool",
+      "readOnly": true,
+      "description": "True if a successful homing cycle has completed"
+    },
+    "fault_history": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/fault_record" },
+      "readOnly": true,
+      "description": "Last 8 fault records (oldest first)"
+    },
+    "max_velocity": {
+      "$ref": "#/definitions/velocity",
+      "description": "Velocity limit applied to all profile moves"
+    },
+    "max_acceleration": {
+      "type": "float",
+      "unit": "rpm_per_s",
+      "description": "Acceleration / deceleration ramp limit"
+    },
+    "following_error_limit": {
+      "type": "float",
+      "unit": "steps",
+      "description": "Max allowed tracking error before fault"
+    }
+  },
+
+  "commands": {
+    "enable": {
+      "description": "Transition the state machine from switch_on_disabled → operation_enabled",
+      "params": {},
+      "returns": { "type": "bool" }
+    },
+    "disable": {
+      "description": "Disable the drive (power stage off, brakes engaged if present)",
+      "params": {},
+      "returns": { "type": "bool" }
+    },
+    "quick_stop": {
+      "description": "Execute a quick stop ramp (state → quick_stop_active)",
+      "params": {}
+    },
+    "move_to": {
+      "description": "Move to an absolute position using the profile position mode",
+      "params": {
+        "position":  { "$ref": "#/definitions/position", "required": true },
+        "velocity":  { "$ref": "#/definitions/velocity" },
+        "relative":  { "type": "bool", "default": false,
+                       "description": "If true, position is relative to current actual_position" }
+      },
+      "returns": { "type": "bool" }
+    },
+    "set_velocity": {
+      "description": "Set target velocity (profile_velocity or velocity mode)",
+      "params": {
+        "velocity": { "$ref": "#/definitions/velocity", "required": true }
+      },
+      "returns": { "type": "bool" }
+    },
+    "home": {
+      "description": "Start a homing sequence with the configured homing method",
+      "params": {
+        "method": {
+          "type": "int",
+          "description": "DS402 homing method code (1–35); omit to use device default"
+        }
+      },
+      "returns": { "type": "bool" }
+    },
+    "reset_fault": {
+      "description": "Clear active fault and return to switch_on_disabled state",
+      "params": {},
+      "returns": { "type": "bool" }
+    },
+    "clear_fault_history": {
+      "description": "Erase the stored fault history log",
+      "params": {}
+    }
+  },
+
+  "events": {
+    "state_changed": {
+      "description": "Emitted on every DS402 state machine transition",
+      "payload": {
+        "old_state": { "type": "string" },
+        "new_state": { "type": "string" }
+      }
+    },
+    "fault_occurred": {
+      "description": "Emitted when the drive enters the fault state",
+      "payload": {
+        "code":        { "type": "int",    "description": "DS402 fault code" },
+        "description": { "type": "string" }
+      }
+    },
+    "move_completed": {
+      "description": "Emitted when a profile position move reaches its target",
+      "payload": {
+        "target_position":  { "$ref": "#/definitions/position" },
+        "actual_position":  { "$ref": "#/definitions/position" },
+        "following_error":  { "type": "float", "unit": "steps" }
+      }
+    },
+    "homing_completed": {
+      "description": "Emitted when a homing cycle finishes",
+      "payload": {
+        "success": { "type": "bool" },
+        "reason":  { "type": "string", "description": "Populated on failure" }
+      }
+    },
+    "temperature_warning": {
+      "description": "Emitted when drive temperature exceeds 80 °C",
+      "payload": {
+        "temperature_c": { "type": "float", "unit": "celsius" }
+      }
+    }
+  }
+}

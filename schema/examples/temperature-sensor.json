@@ -1,0 +1,98 @@
+{
+  "udal": "1.0",
+  "kind": "DeviceCapability",
+  "metadata": {
+    "name": "temperature-sensor",
+    "version": "1.0.0",
+    "description": "Combined temperature and humidity sensor with configurable thresholds",
+    "tags": ["sensor", "mqtt", "environmental"]
+  },
+
+  "definitions": {
+    "threshold": {
+      "type": "object",
+      "properties": {
+        "enabled":   { "type": "bool" },
+        "value":     { "type": "float" },
+        "direction": { "type": "enum", "values": ["above", "below"] }
+      },
+      "required": ["enabled", "value", "direction"]
+    }
+  },
+
+  "properties": {
+    "temperature": {
+      "type": "float",
+      "unit": "celsius",
+      "readOnly": true,
+      "min": -40.0,
+      "max": 125.0,
+      "description": "Current temperature reading"
+    },
+    "humidity": {
+      "type": "float",
+      "unit": "percent",
+      "readOnly": true,
+      "min": 0.0,
+      "max": 100.0,
+      "description": "Relative humidity"
+    },
+    "battery_level": {
+      "type": "int",
+      "unit": "percent",
+      "readOnly": true,
+      "min": 0,
+      "max": 100
+    },
+    "display_unit": {
+      "type": "enum",
+      "values": ["celsius", "fahrenheit"],
+      "default": "celsius"
+    },
+    "sample_interval_s": {
+      "type": "int",
+      "unit": "seconds",
+      "min": 1,
+      "max": 3600,
+      "default": 30
+    },
+    "temp_threshold": { "$ref": "#/definitions/threshold" },
+    "humidity_threshold": { "$ref": "#/definitions/threshold" }
+  },
+
+  "commands": {
+    "calibrate": {
+      "description": "Apply a calibration offset to temperature readings",
+      "params": {
+        "offset": { "type": "float", "unit": "celsius", "required": true }
+      },
+      "returns": { "type": "bool" }
+    },
+    "reset_calibration": {
+      "description": "Remove calibration offset and revert to factory defaults",
+      "params": {}
+    },
+    "reboot": {
+      "description": "Reboot the sensor module",
+      "params": {}
+    }
+  },
+
+  "events": {
+    "threshold_exceeded": {
+      "description": "Emitted when temperature or humidity crosses its configured threshold",
+      "payload": {
+        "sensor":     { "type": "enum", "values": ["temperature", "humidity"] },
+        "value":      { "type": "float" },
+        "threshold":  { "type": "float" },
+        "direction":  { "type": "enum", "values": ["above", "below"] }
+      }
+    },
+    "battery_low": {
+      "description": "Emitted when battery drops below 15%",
+      "payload": {
+        "level": { "type": "int", "unit": "percent" }
+      }
+    }
+  }
+}

@@ -1,0 +1,137 @@
+{
+  "udal": "1.0",
+  "kind": "DeviceCapability",
+  "metadata": {
+    "name": "smart-pdu",
+    "version": "1.0.0",
+    "description": "Smart power distribution unit with per-outlet metering and switching",
+    "tags": ["power", "http", "energy", "datacenter"]
+  },
+
+  "definitions": {
+    "outlet_reading": {
+      "type": "object",
+      "properties": {
+        "outlet_id":    { "type": "int" },
+        "voltage_v":    { "type": "float", "unit": "V" },
+        "current_a":    { "type": "float", "unit": "A" },
+        "power_w":      { "type": "float", "unit": "W" },
+        "energy_kwh":   { "type": "float", "unit": "kWh" },
+        "state":        { "type": "enum", "values": ["on", "off", "fault"] }
+      },
+      "required": ["outlet_id", "state"]
+    },
+    "outlet_threshold": {
+      "type": "object",
+      "properties": {
+        "current_a_max": { "type": "float", "unit": "A" },
+        "power_w_max":   { "type": "float", "unit": "W" }
+      }
+    }
+  },
+
+  "properties": {
+    "outlet_count": {
+      "type": "int",
+      "readOnly": true,
+      "description": "Total number of controllable outlets"
+    },
+    "total_power_w": {
+      "type": "float",
+      "unit": "W",
+      "readOnly": true,
+      "description": "Sum of active-outlet wattage"
+    },
+    "total_energy_kwh": {
+      "type": "float",
+      "unit": "kWh",
+      "readOnly": true,
+      "description": "Accumulated energy since last counter reset"
+    },
+    "input_voltage_v": {
+      "type": "float",
+      "unit": "V",
+      "readOnly": true
+    },
+    "input_frequency_hz": {
+      "type": "float",
+      "unit": "Hz",
+      "readOnly": true
+    },
+    "outlets": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/outlet_reading" },
+      "readOnly": true,
+      "description": "Per-outlet live readings"
+    },
+    "outlet_thresholds": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/outlet_threshold" },
+      "description": "Per-outlet overcurrent / overpower limits; index maps 1:1 to outlet_id"
+    },
+    "overload_action": {
+      "type": "enum",
+      "values": ["alert_only", "switch_off", "switch_off_and_alert"],
+      "default": "alert_only"
+    }
+  },
+
+  "commands": {
+    "set_outlet": {
+      "description": "Switch a single outlet on or off",
+      "params": {
+        "outlet_id": { "type": "int", "required": true },
+        "state":     { "type": "enum", "values": ["on", "off"], "required": true }
+      },
+      "returns": { "type": "bool" }
+    },
+    "set_all_outlets": {
+      "description": "Switch all outlets simultaneously",
+      "params": {
+        "state": { "type": "enum", "values": ["on", "off"], "required": true }
+      },
+      "returns": { "type": "bool" }
+    },
+    "reset_energy_counter": {
+      "description": "Reset the accumulated energy counter to zero",
+      "params": {
+        "outlet_id": {
+          "type": "int",
+          "description": "Outlet to reset; omit to reset the total counter"
+        }
+      }
+    },
+    "reboot": {
+      "description": "Reboot the PDU management card (outlets stay powered)",
+      "params": {}
+    }
+  },
+
+  "events": {
+    "outlet_overload": {
+      "description": "Emitted when an outlet exceeds its configured threshold",
+      "payload": {
+        "outlet_id":   { "type": "int" },
+        "current_a":   { "type": "float", "unit": "A" },
+        "power_w":     { "type": "float", "unit": "W" },
+        "action_taken": { "type": "enum", "values": ["none", "switched_off"] }
+      }
+    },
+    "outlet_state_changed": {
+      "description": "Emitted whenever an outlet switches state (manual or automatic)",
+      "payload": {
+        "outlet_id": { "type": "int" },
+        "old_state": { "type": "enum", "values": ["on", "off", "fault"] },
+        "new_state": { "type": "enum", "values": ["on", "off", "fault"] },
+        "cause":     { "type": "enum", "values": ["manual", "overload", "schedule", "api"] }
+      }
+    },
+    "input_voltage_alert": {
+      "description": "Emitted when mains voltage is outside the ±10 % nominal range",
+      "payload": {
+        "voltage_v": { "type": "float", "unit": "V" },
+        "nominal_v": { "type": "float", "unit": "V" }
+      }
+    }
+  }
+}
