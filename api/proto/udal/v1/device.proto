@@ -95,7 +95,7 @@ service DeviceService {
   }
 
   // Streaming
-  rpc Subscribe(SubscribeRequest) returns (stream PropertyUpdate) {
+  rpc Subscribe(SubscribeRequest) returns (stream SubscribeResponse) {
     // WebSocket / SSE via grpc-gateway streaming — no HTTP annotation (streaming not supported by grpc-gateway v2 REST mapping)
   }
 }
@@ -153,7 +153,8 @@ message SubscribeRequest {
   string device_id     = 1;
   string property_path = 2;  // empty = subscribe to all properties
 }
-message PropertyUpdate {
+// SubscribeResponse is one streamed event from the Subscribe RPC.
+message SubscribeResponse {
   string                    device_id     = 1;
   string                    property_path = 2;
   PropertyValue             value         = 3;

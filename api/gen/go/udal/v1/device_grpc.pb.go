@@ -44,7 +44,7 @@ type DeviceServiceClient interface {
 	// Command execution
 	SendCommand(ctx context.Context, in *SendCommandRequest, opts ...grpc.CallOption) (*SendCommandResponse, error)
 	// Streaming
-	Subscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[PropertyUpdate], error)
+	Subscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[SubscribeResponse], error)
 }
 
 type deviceServiceClient struct {
@@ -125,13 +125,13 @@ func (c *deviceServiceClient) SendCommand(ctx context.Context, in *SendCommandRe
 	return out, nil
 }
 
-func (c *deviceServiceClient) Subscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[PropertyUpdate], error) {
+func (c *deviceServiceClient) Subscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[SubscribeResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &DeviceService_ServiceDesc.Streams[0], DeviceService_Subscribe_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &grpc.GenericClientStream[SubscribeRequest, PropertyUpdate]{ClientStream: stream}
+	x := &grpc.GenericClientStream[SubscribeRequest, SubscribeResponse]{ClientStream: stream}
 	if err := x.ClientStream.SendMsg(in); err != nil {
 		return nil, err
 	}
@@ -142,7 +142,7 @@ func (c *deviceServiceClient) Subscribe(ctx context.Context, in *SubscribeReques
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type DeviceService_SubscribeClient = grpc.ServerStreamingClient[PropertyUpdate]
+type DeviceService_SubscribeClient = grpc.ServerStreamingClient[SubscribeResponse]
 
 // DeviceServiceServer is the server API for DeviceService service.
 // All implementations must embed UnimplementedDeviceServiceServer
@@ -159,7 +159,7 @@ type DeviceServiceServer interface {
 	// Command execution
 	SendCommand(context.Context, *SendCommandRequest) (*SendCommandResponse, error)
 	// Streaming
-	Subscribe(*SubscribeRequest, grpc.ServerStreamingServer[PropertyUpdate]) error
+	Subscribe(*SubscribeRequest, grpc.ServerStreamingServer[SubscribeResponse]) error
 	mustEmbedUnimplementedDeviceServiceServer()
 }
 
@@ -191,7 +191,7 @@ func (UnimplementedDeviceServiceServer) SetProperty(context.Context, *SetPropert
 func (UnimplementedDeviceServiceServer) SendCommand(context.Context, *SendCommandRequest) (*SendCommandResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SendCommand not implemented")
 }
-func (UnimplementedDeviceServiceServer) Subscribe(*SubscribeRequest, grpc.ServerStreamingServer[PropertyUpdate]) error {
+func (UnimplementedDeviceServiceServer) Subscribe(*SubscribeRequest, grpc.ServerStreamingServer[SubscribeResponse]) error {
 	return status.Error(codes.Unimplemented, "method Subscribe not implemented")
 }
 func (UnimplementedDeviceServiceServer) mustEmbedUnimplementedDeviceServiceServer() {}
@@ -346,11 +346,11 @@ func _DeviceService_Subscribe_Handler(srv interface{}, stream grpc.ServerStream)
 	if err := stream.RecvMsg(m); err != nil {
 		return err
 	}
-	return srv.(DeviceServiceServer).Subscribe(m, &grpc.GenericServerStream[SubscribeRequest, PropertyUpdate]{ServerStream: stream})
+	return srv.(DeviceServiceServer).Subscribe(m, &grpc.GenericServerStream[SubscribeRequest, SubscribeResponse]{ServerStream: stream})
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type DeviceService_SubscribeServer = grpc.ServerStreamingServer[PropertyUpdate]
+type DeviceService_SubscribeServer = grpc.ServerStreamingServer[SubscribeResponse]
 
 // DeviceService_ServiceDesc is the grpc.ServiceDesc for DeviceService service.
 // It's only intended for direct use with grpc.RegisterService,
