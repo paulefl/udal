@@ -9,8 +9,11 @@ import "time"
 type DeviceStatus int
 
 const (
+	// DeviceStatusUnknown means the device's state has not yet been determined.
 	DeviceStatusUnknown DeviceStatus = iota
+	// DeviceStatusOnline means the device is reachable and responding.
 	DeviceStatusOnline
+	// DeviceStatusOffline means the device has not been heard from recently.
 	DeviceStatusOffline
 )
 
@@ -25,7 +28,7 @@ func (s DeviceStatus) String() string {
 	}
 }
 
-// Device represents a registered IoT device.
+// Device represents a registered IoT device in the device registry.
 type Device struct {
 	ID         string
 	Name       string
@@ -37,6 +40,7 @@ type Device struct {
 }
 
 // PropertyValue is a discriminated union for typed property values.
+// Exactly one field should be non-nil/non-empty.
 type PropertyValue struct {
 	BoolVal   *bool
 	IntVal    *int64
@@ -47,7 +51,8 @@ type PropertyValue struct {
 	JSONVal []byte
 }
 
-// PropertyUpdate is emitted by the Subscribe stream.
+// PropertyUpdate is emitted on the Subscribe server-streaming RPC
+// whenever a device property changes.
 type PropertyUpdate struct {
 	DeviceID     string
 	PropertyPath string

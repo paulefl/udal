@@ -5,6 +5,7 @@ managed:
   override:
     - file_option: go_package_prefix
       value: github.com/paulefl/udal/api/gen/go
+      module: buf.build/paulefl/udal
 
 plugins:
   - remote: buf.build/protocolbuffers/go

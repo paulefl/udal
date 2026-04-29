@@ -16,15 +16,22 @@ var ErrNotFound = fmt.Errorf("device not found")
 var ErrAlreadyExists = fmt.Errorf("device already exists")
 
 // Registry stores and retrieves Device records.
+// Implementations must be safe for concurrent use.
 type Registry interface {
+	// Register adds a new device. If d.ID is empty, a unique ID is generated.
 	Register(d api.Device) (api.Device, error)
+	// Get returns the device with the given ID or ErrNotFound.
 	Get(id string) (api.Device, error)
+	// List returns all devices optionally filtered by capability and/or transport.
+	// Empty strings mean "no filter".
 	List(capability, transport string) ([]api.Device, error)
+	// Delete removes a device. Returns ErrNotFound if the device does not exist.
 	Delete(id string) error
+	// UpdateStatus sets the device's status and last-seen timestamp.
 	UpdateStatus(id string, status api.DeviceStatus, lastSeen time.Time) error
 }
 
-// MemoryRegistry is an in-memory Registry implementation used for tests.
+// MemoryRegistry is a thread-safe in-memory Registry implementation used for tests.
 type MemoryRegistry struct {
 	mu      sync.RWMutex
 	devices map[string]api.Device
