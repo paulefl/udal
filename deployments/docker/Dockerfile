@@ -1,9 +1,8 @@
-FROM golang:1.22-alpine AS builder
+FROM golang:1.24-alpine AS builder
 WORKDIR /app
-COPY gateway/go.mod gateway/go.sum ./gateway/
-RUN cd gateway && go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o /udal-gateway ./gateway/cmd/gateway/
+RUN cd gateway && go mod download && \
+    CGO_ENABLED=0 GOOS=linux go build -o /udal-gateway ./cmd/gateway/
 
 FROM gcr.io/distroless/static:nonroot
 COPY --from=builder /udal-gateway /udal-gateway
